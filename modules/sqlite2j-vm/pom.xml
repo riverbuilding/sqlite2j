@@ -11,6 +11,16 @@
   <name>sqlite2j-vm</name>
   <dependencies>
     <dependency>
+      <groupId>org.sqlite2j</groupId>
+      <artifactId>sqlite2j-compiler</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.sqlite2j</groupId>
+      <artifactId>sqlite2j-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
