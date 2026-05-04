@@ -54,11 +54,25 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.2.5</version>
+          <configuration>
+            <systemPropertyVariables>
+              <user.timezone>UTC</user.timezone>
+              <user.language>en</user.language>
+              <user.country>US</user.country>
+            </systemPropertyVariables>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-failsafe-plugin</artifactId>
           <version>3.2.5</version>
+          <configuration>
+            <systemPropertyVariables>
+              <user.timezone>UTC</user.timezone>
+              <user.language>en</user.language>
+              <user.country>US</user.country>
+            </systemPropertyVariables>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>

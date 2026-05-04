@@ -77,3 +77,9 @@
 ## 0.3 Completion Artifacts
 - `docs/architecture/module-boundaries.md`
 - `docs/architecture/package-layout.md`
+
+## 0.4–0.6 Completion Artifacts
+- `docs/error-model.md`
+- `docs/storage-abstractions.md`
+- `docs/testing/framework-baseline.md`
+- `modules/sqlite2j-compat-tests/src/test/java/org/sqlite2j/compat/DeterminismBaselineTest.java`
