@@ -76,3 +76,11 @@ through a complete path: parser -> code generator -> VM -> B-tree -> pager.
 - [ ] No ORDER BY sorting.
 - [ ] No UPDATE/DELETE.
 - [ ] No rollback journal recovery logic (planned Phase 3).
+
+
+## 1. Scope Definition Artifacts
+- `docs/phase1/scope-definition.md`
+- `docs/phase1/acceptance-scripts.md`
+- `testdata/sql/phase1/01_create_insert_select.sql`
+- `testdata/sql/phase1/02_single_table_smoke.sql`
+- `testdata/sql/phase1/03_unsupported_features.sql`
