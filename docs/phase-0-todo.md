@@ -83,3 +83,5 @@
 - `docs/storage-abstractions.md`
 - `docs/testing/framework-baseline.md`
 - `modules/sqlite2j-compat-tests/src/test/java/org/sqlite2j/compat/DeterminismBaselineTest.java`
+
+- `docs/phase-0-exit-gates.md`
