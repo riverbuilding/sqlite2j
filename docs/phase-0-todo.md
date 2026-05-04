@@ -73,3 +73,7 @@
 - [ ] No B-tree algorithm implementation.
 - [ ] No rollback journal recovery implementation.
 - [ ] No performance optimization work.
+
+## 0.3 Completion Artifacts
+- `docs/architecture/module-boundaries.md`
+- `docs/architecture/package-layout.md`

@@ -29,6 +29,8 @@ Detailed phase planning:
 - `docs/phase-1-todo.md`
 
 ## Standards and Governance
+- Architecture boundaries: `docs/architecture/module-boundaries.md`
+- Package layout: `docs/architecture/package-layout.md`
 - Coding standards: `docs/coding-conventions.md`
 - Compatibility tracking: `docs/sqlite2-compatibility-matrix.md`
 - Deterministic test rules: `docs/testing-determinism.md`
