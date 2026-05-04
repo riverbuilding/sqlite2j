@@ -1,0 +1,9 @@
+package org.sqlite2j.sql;
+
+public enum SqlErrorCode {
+  SYNTAX_ERROR,
+  UNSUPPORTED_STATEMENT,
+  UNEXPECTED_TOKEN,
+  UNTERMINATED_STRING,
+  INVALID_IDENTIFIER
+}
