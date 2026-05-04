@@ -24,6 +24,9 @@ public final class Parser {
     else if (match(TokenType.SELECT)) stmt = parseSelect();
     else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, and SELECT * FROM are supported in Phase 1");
 
+    if (!check(TokenType.SEMICOLON) && !check(TokenType.EOF)) {
+      throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Unsupported clause in Phase 1 near token: " + peek().getLexeme());
+    }
     match(TokenType.SEMICOLON);
     consume(TokenType.EOF, SqlErrorCode.UNEXPECTED_TOKEN, "Unexpected trailing input");
     return stmt;

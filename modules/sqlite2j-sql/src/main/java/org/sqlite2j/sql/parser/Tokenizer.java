@@ -20,6 +20,7 @@ public final class Tokenizer {
         case ',': out.add(new Token(TokenType.COMMA, ",", pos)); i++; continue;
         case '*': out.add(new Token(TokenType.STAR, "*", pos)); i++; continue;
         case ';': out.add(new Token(TokenType.SEMICOLON, ";", pos)); i++; continue;
+        case '=': out.add(new Token(TokenType.EQUAL, "=", pos)); i++; continue;
         case '\'': {
           int start = i + 1;
           i++;

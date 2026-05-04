@@ -40,7 +40,7 @@ class ParserTest {
   @Test
   void rejectsUnsupportedWhereClause() {
     SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("SELECT * FROM users WHERE id = 1;"));
-    assertEquals(SqlErrorCode.UNEXPECTED_TOKEN, ex.getCode());
+    assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
   }
 
   @Test
