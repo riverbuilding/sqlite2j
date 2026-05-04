@@ -48,4 +48,25 @@ class ParserTest {
     SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("DELETE FROM users;"));
     assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
   }
+
+  @Test
+  void parsesCreateTableWithoutSemicolon() {
+    var stmt = parser.parse("CREATE TABLE users (id INT, name TEXT)");
+    var create = assertInstanceOf(CreateTableStatement.class, stmt);
+    assertEquals("users", create.getTableName());
+    assertEquals(2, create.getColumns().size());
+  }
+
+  @Test
+  void reportsInvalidIdentifierForQuotedTableName() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("CREATE TABLE 'users' (id INT);"));
+    assertEquals(SqlErrorCode.INVALID_IDENTIFIER, ex.getCode());
+  }
+
+  @Test
+  void reportsUnexpectedTokenForMissingColumnType() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("CREATE TABLE users (id);"));
+    assertEquals(SqlErrorCode.INVALID_IDENTIFIER, ex.getCode());
+  }
+
 }
