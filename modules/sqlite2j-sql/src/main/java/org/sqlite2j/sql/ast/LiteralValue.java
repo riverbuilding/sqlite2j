@@ -1,3 +1,11 @@
 package org.sqlite2j.sql.ast;
 
-public record LiteralValue(Object value) {}
+public final class LiteralValue {
+  private final Object value;
+
+  public LiteralValue(Object value) {
+    this.value = value;
+  }
+
+  public Object getValue() { return value; }
+}

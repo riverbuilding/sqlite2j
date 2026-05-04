@@ -62,29 +62,29 @@ public final class Parser {
   }
 
   private Object parseLiteral() {
-    if (match(TokenType.STRING)) return previous().lexeme();
-    if (match(TokenType.NUMBER)) return Long.parseLong(previous().lexeme());
+    if (match(TokenType.STRING)) return previous().getLexeme();
+    if (match(TokenType.NUMBER)) return Long.parseLong(previous().getLexeme());
     throw error(peek(), SqlErrorCode.UNEXPECTED_TOKEN, "Expected literal value (string or integer)");
   }
 
   private String identifier(String msg) {
     Token t = consume(TokenType.IDENTIFIER, SqlErrorCode.INVALID_IDENTIFIER, msg);
-    return t.lexeme();
+    return t.getLexeme();
   }
 
   private boolean match(TokenType t) { if (check(t)) { advance(); return true; } return false; }
-  private boolean check(TokenType t) { return peek().type() == t; }
+  private boolean check(TokenType t) { return peek().getType() == t; }
   private Token advance() { if (!isAtEnd()) current++; return previous(); }
-  private boolean isAtEnd() { return peek().type() == TokenType.EOF; }
+  private boolean isAtEnd() { return peek().getType() == TokenType.EOF; }
   private Token peek() { return tokens.get(current); }
   private Token previous() { return tokens.get(current - 1); }
 
   private Token consume(TokenType type, SqlErrorCode code, String message) {
     if (check(type)) return advance();
-    throw error(peek(), code, message + " at position " + peek().position());
+    throw error(peek(), code, message + " at position " + peek().getPosition());
   }
 
   private SqlParseException error(Token t, SqlErrorCode code, String msg) {
-    return new SqlParseException(code, msg, t.position());
+    return new SqlParseException(code, msg, t.getPosition());
   }
 }

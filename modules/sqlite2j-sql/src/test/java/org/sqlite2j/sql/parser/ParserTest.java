@@ -18,23 +18,23 @@ class ParserTest {
   void parsesCreateTable() {
     var stmt = parser.parse("CREATE TABLE users (id INT, name TEXT);");
     var create = assertInstanceOf(CreateTableStatement.class, stmt);
-    assertEquals("users", create.tableName());
-    assertEquals(2, create.columns().size());
+    assertEquals("users", create.getTableName());
+    assertEquals(2, create.getColumns().size());
   }
 
   @Test
   void parsesInsert() {
     var stmt = parser.parse("INSERT INTO users VALUES (1, 'alice');");
     var insert = assertInstanceOf(InsertStatement.class, stmt);
-    assertEquals("users", insert.tableName());
-    assertEquals(2, insert.values().size());
+    assertEquals("users", insert.getTableName());
+    assertEquals(2, insert.getValues().size());
   }
 
   @Test
   void parsesSelectAll() {
     var stmt = parser.parse("SELECT * FROM users;");
     var select = assertInstanceOf(SelectAllStatement.class, stmt);
-    assertEquals("users", select.tableName());
+    assertEquals("users", select.getTableName());
   }
 
   @Test
