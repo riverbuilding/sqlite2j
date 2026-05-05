@@ -21,6 +21,32 @@ public final class Tokenizer {
         case '*': out.add(new Token(TokenType.STAR, "*", pos)); i++; continue;
         case ';': out.add(new Token(TokenType.SEMICOLON, ";", pos)); i++; continue;
         case '=': out.add(new Token(TokenType.EQUAL, "=", pos)); i++; continue;
+        case '!':
+          if (i + 1 < sql.length() && sql.charAt(i + 1) == '=') {
+            out.add(new Token(TokenType.BANG_EQUAL, "!=", pos));
+            i += 2;
+            continue;
+          }
+          throw new SqlParseException(SqlErrorCode.SYNTAX_ERROR, "Unexpected character '!'", pos);
+        case '<':
+          if (i + 1 < sql.length() && sql.charAt(i + 1) == '=') {
+            out.add(new Token(TokenType.LTE, "<=", pos));
+            i += 2;
+            continue;
+          }
+          if (i + 1 < sql.length() && sql.charAt(i + 1) == '>') {
+            out.add(new Token(TokenType.BANG_EQUAL, "<>", pos));
+            i += 2;
+            continue;
+          }
+          out.add(new Token(TokenType.LT, "<", pos)); i++; continue;
+        case '>':
+          if (i + 1 < sql.length() && sql.charAt(i + 1) == '=') {
+            out.add(new Token(TokenType.GTE, ">=", pos));
+            i += 2;
+            continue;
+          }
+          out.add(new Token(TokenType.GT, ">", pos)); i++; continue;
         case '\'': {
           int start = i + 1;
           i++;
@@ -61,6 +87,9 @@ public final class Tokenizer {
       case "VALUES" -> TokenType.VALUES;
       case "SELECT" -> TokenType.SELECT;
       case "FROM" -> TokenType.FROM;
+      case "NULL" -> TokenType.NULL;
+      case "AND" -> TokenType.AND;
+      case "OR" -> TokenType.OR;
       default -> TokenType.IDENTIFIER;
     };
   }

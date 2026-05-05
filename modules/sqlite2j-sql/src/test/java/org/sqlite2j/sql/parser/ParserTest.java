@@ -8,8 +8,11 @@ import org.junit.jupiter.api.Test;
 import org.sqlite2j.sql.SqlErrorCode;
 import org.sqlite2j.sql.SqlParseException;
 import org.sqlite2j.sql.ast.CreateTableStatement;
+import org.sqlite2j.sql.ast.Expression;
 import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.SelectAllStatement;
+import org.sqlite2j.sql.ast.ComparisonExpression;
+import org.sqlite2j.sql.ast.ComparisonOperator;
 
 class ParserTest {
   private final Parser parser = new Parser();
@@ -67,6 +70,25 @@ class ParserTest {
   void reportsUnexpectedTokenForMissingColumnType() {
     SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("CREATE TABLE users (id);"));
     assertEquals(SqlErrorCode.INVALID_IDENTIFIER, ex.getCode());
+  }
+
+  @Test
+  void parsesComparisonExpression() {
+    Expression expr = parser.parseExpression("id >= 10");
+    ComparisonExpression comparison = assertInstanceOf(ComparisonExpression.class, expr);
+    assertEquals(ComparisonOperator.GTE, comparison.getOperator());
+  }
+
+  @Test
+  void rejectsBooleanConjunctionForNow() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parseExpression("id = 1 AND name = 'a'"));
+    assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
+  }
+
+  @Test
+  void rejectsNullComparisonsForNow() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parseExpression("id = NULL"));
+    assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
   }
 
 }

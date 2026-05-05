@@ -5,8 +5,13 @@ import java.util.List;
 import org.sqlite2j.sql.SqlErrorCode;
 import org.sqlite2j.sql.SqlParseException;
 import org.sqlite2j.sql.ast.ColumnDef;
+import org.sqlite2j.sql.ast.ColumnExpression;
+import org.sqlite2j.sql.ast.ComparisonExpression;
+import org.sqlite2j.sql.ast.ComparisonOperator;
 import org.sqlite2j.sql.ast.CreateTableStatement;
+import org.sqlite2j.sql.ast.Expression;
 import org.sqlite2j.sql.ast.InsertStatement;
+import org.sqlite2j.sql.ast.LiteralExpression;
 import org.sqlite2j.sql.ast.LiteralValue;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.Statement;
@@ -30,6 +35,17 @@ public final class Parser {
     match(TokenType.SEMICOLON);
     consume(TokenType.EOF, SqlErrorCode.UNEXPECTED_TOKEN, "Unexpected trailing input");
     return stmt;
+  }
+
+  public Expression parseExpression(String sql) {
+    this.tokens = new Tokenizer().tokenize(sql);
+    this.current = 0;
+    Expression expression = parseComparisonExpression();
+    if (match(TokenType.AND) || match(TokenType.OR)) {
+      throw error(previous(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Boolean conjunction is not supported yet in Phase 2");
+    }
+    consume(TokenType.EOF, SqlErrorCode.UNEXPECTED_TOKEN, "Unexpected trailing input in expression");
+    return expression;
   }
 
   private Statement parseCreateTable() {
@@ -68,6 +84,36 @@ public final class Parser {
     if (match(TokenType.STRING)) return previous().getLexeme();
     if (match(TokenType.NUMBER)) return Long.parseLong(previous().getLexeme());
     throw error(peek(), SqlErrorCode.UNEXPECTED_TOKEN, "Expected literal value (string or integer)");
+  }
+
+  private Expression parseComparisonExpression() {
+    Expression left = parseOperand();
+    ComparisonOperator operator = parseComparisonOperator();
+    Expression right = parseOperand();
+    return new ComparisonExpression(left, operator, right);
+  }
+
+  private Expression parseOperand() {
+    if (match(TokenType.IDENTIFIER)) {
+      return new ColumnExpression(previous().getLexeme());
+    }
+    if (match(TokenType.NULL)) {
+      throw error(previous(), SqlErrorCode.UNSUPPORTED_STATEMENT, "NULL comparisons are not supported yet in Phase 2");
+    }
+    if (check(TokenType.STRING) || check(TokenType.NUMBER)) {
+      return new LiteralExpression(new LiteralValue(parseLiteral()));
+    }
+    throw error(peek(), SqlErrorCode.UNEXPECTED_TOKEN, "Expected column reference or literal");
+  }
+
+  private ComparisonOperator parseComparisonOperator() {
+    if (match(TokenType.EQUAL)) return ComparisonOperator.EQ;
+    if (match(TokenType.BANG_EQUAL)) return ComparisonOperator.NE;
+    if (match(TokenType.LT)) return ComparisonOperator.LT;
+    if (match(TokenType.LTE)) return ComparisonOperator.LTE;
+    if (match(TokenType.GT)) return ComparisonOperator.GT;
+    if (match(TokenType.GTE)) return ComparisonOperator.GTE;
+    throw error(peek(), SqlErrorCode.UNEXPECTED_TOKEN, "Expected comparison operator");
   }
 
   private String identifier(String msg) {
