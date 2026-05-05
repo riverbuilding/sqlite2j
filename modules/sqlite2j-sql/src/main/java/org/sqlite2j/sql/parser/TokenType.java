@@ -1,0 +1,7 @@
+package org.sqlite2j.sql.parser;
+
+public enum TokenType {
+  CREATE, TABLE, INSERT, INTO, VALUES, SELECT, FROM,
+  STAR, LPAREN, RPAREN, COMMA, SEMICOLON, EQUAL,
+  IDENTIFIER, NUMBER, STRING, EOF
+}
