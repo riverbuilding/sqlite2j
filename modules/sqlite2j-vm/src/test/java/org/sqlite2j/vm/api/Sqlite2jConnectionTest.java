@@ -2,12 +2,15 @@ package org.sqlite2j.vm.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
 class Sqlite2jConnectionTest {
   @Test
-  void openPrepareStepCloseFlow() {
-    Sqlite2jConnection conn = Sqlite2jConnection.open("catalog-placeholder.db");
+  void openPrepareStepCloseFlow() throws Exception {
+    Path db = Files.createTempFile("sqlite2j-api", ".db");
+    Sqlite2jConnection conn = Sqlite2jConnection.open(db.toString());
     conn.prepare("CREATE TABLE users (id INT, name TEXT);").close();
     conn.prepare("INSERT INTO users VALUES (1, 'alice');").close();
 

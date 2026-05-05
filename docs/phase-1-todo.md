@@ -84,3 +84,8 @@ through a complete path: parser -> code generator -> VM -> B-tree -> pager.
 - `testdata/sql/phase1/01_create_insert_select.sql`
 - `testdata/sql/phase1/02_single_table_smoke.sql`
 - `testdata/sql/phase1/03_unsupported_features.sql`
+
+
+## 9. Exit Criteria Artifacts
+- `docs/phase1/exit-criteria.md`
+- `docs/phase2/backlog.md`

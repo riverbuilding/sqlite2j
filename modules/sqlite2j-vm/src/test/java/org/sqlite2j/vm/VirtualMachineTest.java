@@ -3,7 +3,7 @@ package org.sqlite2j.vm;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import java.nio.file.Path;
+import java.nio.file.Files;
 import org.junit.jupiter.api.Test;
 import org.sqlite2j.compiler.codegen.CompilerFacade;
 import org.sqlite2j.compiler.codegen.Program;
@@ -12,8 +12,8 @@ class VirtualMachineTest {
   private final CompilerFacade compiler = new CompilerFacade();
 
   @Test
-  void createInsertSelectRoundTrip() {
-    VmDatabase db = new VmDatabase(Path.of("catalog-placeholder.db"));
+  void createInsertSelectRoundTrip() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);
 
     vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
@@ -30,8 +30,8 @@ class VirtualMachineTest {
   }
 
   @Test
-  void createTableMetadataRegistered() {
-    VmDatabase db = new VmDatabase(Path.of("catalog-placeholder.db"));
+  void createTableMetadataRegistered() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);
 
     Program create = compiler.compile("CREATE TABLE events (id INT, label TEXT);");
@@ -42,8 +42,8 @@ class VirtualMachineTest {
   }
 
   @Test
-  void duplicateTableCreateFails() {
-    VmDatabase db = new VmDatabase(Path.of("catalog-placeholder.db"));
+  void duplicateTableCreateFails() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);
 
     vm.execute(compiler.compile("CREATE TABLE t (id INT);"));
