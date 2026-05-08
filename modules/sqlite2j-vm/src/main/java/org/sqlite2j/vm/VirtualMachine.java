@@ -22,6 +22,7 @@ public final class VirtualMachine {
     VmCursor cursor = null;
     VmRow registerRecord = null;
     String openReadTable = null;
+    String openWriteTable = null;
     String currentWhere = null;
 
     for (Instruction instruction : program.getInstructions()) {
@@ -29,7 +30,7 @@ public final class VirtualMachine {
       if (opcode == Opcode.CREATE_TABLE) {
         database.createTable(new TableSchema(instruction.getP1(), parseColumns(instruction.getP2())));
       } else if (opcode == Opcode.OPEN_WRITE) {
-        // placeholder: writes target table via INSERT_ROW p1
+        openWriteTable = instruction.getP1();
       } else if (opcode == Opcode.OPEN_READ) {
         openReadTable = instruction.getP1();
         cursor = database.openReadCursor(instruction.getP1());
@@ -51,6 +52,10 @@ public final class VirtualMachine {
         }
         sortRowsIfRequested(rows, openReadTable, instruction.getP2());
         for (VmRow row : rows) result.addRow(row);
+      } else if (opcode == Opcode.UPDATE_ROWS) {
+        applyUpdateRows(openWriteTable, currentWhere, instruction.getP1(), instruction.getP2());
+      } else if (opcode == Opcode.DELETE_ROWS) {
+        applyDeleteRows(openWriteTable, currentWhere);
       } else if (opcode == Opcode.HALT) {
         break;
       } else {
@@ -58,6 +63,37 @@ public final class VirtualMachine {
       }
     }
     return result;
+  }
+
+  private void applyUpdateRows(String tableName, String where, String columnName, String encodedLiteral) {
+    if (tableName == null) throw new IllegalStateException("No open table for UPDATE_ROWS");
+    int targetColumnIndex = findColumnIndex(tableName, columnName);
+    VmValue newValue = parseEncodedLiteral(encodedLiteral);
+
+    List<VmRow> source = database.rowsView(tableName);
+    List<VmRow> updated = new ArrayList<VmRow>(source.size());
+    for (VmRow row : source) {
+      if (matchesWhere(tableName, row, where)) {
+        List<VmValue> values = new ArrayList<VmValue>(row.getValues());
+        values.set(targetColumnIndex, newValue);
+        updated.add(new VmRow(values));
+      } else {
+        updated.add(row);
+      }
+    }
+    database.replaceRows(tableName, updated);
+  }
+
+  private void applyDeleteRows(String tableName, String where) {
+    if (tableName == null) throw new IllegalStateException("No open table for DELETE_ROWS");
+    List<VmRow> source = database.rowsView(tableName);
+    List<VmRow> kept = new ArrayList<VmRow>();
+    for (VmRow row : source) {
+      if (!matchesWhere(tableName, row, where)) {
+        kept.add(row);
+      }
+    }
+    database.replaceRows(tableName, kept);
   }
 
   private void sortRowsIfRequested(List<VmRow> rows, String tableName, String orderBy) {
@@ -95,7 +131,7 @@ public final class VirtualMachine {
     int columnIndex = findColumnIndex(tableName, columnName);
     VmValue leftValue = row.getValues().get(columnIndex);
     VmValue rightValue = parseEncodedLiteral(literal);
-    return compareByOperator(compareValues(leftValue, rightValue), op);
+    return compareByOperator(compareValuesForWhere(leftValue, rightValue), op);
   }
 
   private VmValue parseEncodedLiteral(String literal) {
@@ -115,13 +151,20 @@ public final class VirtualMachine {
     throw new IllegalStateException("Unsupported WHERE operator: " + operator);
   }
 
+  private int compareValuesForWhere(VmValue left, VmValue right) {
+    if (left.getType() != right.getType()) {
+      throw new IllegalStateException("Type mismatch in WHERE comparison: " + left.getType() + " vs " + right.getType());
+    }
+    return compareValues(left, right);
+  }
+
   private int findColumnIndex(String tableName, String columnName) {
     TableSchema schema = database.getSchemaRegistry().findTable(tableName)
         .orElseThrow(() -> new IllegalStateException("Table not found: " + tableName));
     for (int i = 0; i < schema.getColumns().size(); i++) {
       if (schema.getColumns().get(i).getName().equalsIgnoreCase(columnName)) return i;
     }
-    throw new IllegalStateException("Unknown ORDER BY column: " + columnName);
+    throw new IllegalStateException("Unknown column: " + columnName);
   }
 
   private int compareValues(VmValue left, VmValue right) {

@@ -89,4 +89,57 @@ class VirtualMachineTest {
     assertEquals(2L, filtered.getRows().get(0).getValues().get(0).getValue());
     assertEquals(3L, filtered.getRows().get(1).getValues().get(0).getValue());
   }
+
+  @Test
+  void updateRowsSupportsFilteredAndUnfilteredForms() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+
+    vm.execute(compiler.compile("UPDATE users SET name = 'x' WHERE id = 1;"));
+    VmResult first = vm.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+    assertEquals("x", first.getRows().get(0).getValues().get(1).getValue());
+    assertEquals("bob", first.getRows().get(1).getValues().get(1).getValue());
+
+    vm.execute(compiler.compile("UPDATE users SET name = 'z';"));
+    VmResult second = vm.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+    assertEquals("z", second.getRows().get(0).getValues().get(1).getValue());
+    assertEquals("z", second.getRows().get(1).getValues().get(1).getValue());
+  }
+
+  @Test
+  void deleteRowsSupportsFilteredAndUnfilteredForms() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (3, 'carl');"));
+
+    vm.execute(compiler.compile("DELETE FROM users WHERE id = 2;"));
+    VmResult first = vm.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+    assertEquals(2, first.getRows().size());
+    assertEquals(1L, first.getRows().get(0).getValues().get(0).getValue());
+    assertEquals(3L, first.getRows().get(1).getValues().get(0).getValue());
+
+    vm.execute(compiler.compile("DELETE FROM users;"));
+    VmResult second = vm.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+    assertEquals(0, second.getRows().size());
+  }
+
+  @Test
+  void whereWithUnknownColumnFailsDeterministically() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    RuntimeException ex = assertThrows(RuntimeException.class,
+        () -> vm.execute(compiler.compile("SELECT * FROM users WHERE missing = 1;")));
+    assertEquals("Unknown column: missing", ex.getMessage());
+  }
 }
