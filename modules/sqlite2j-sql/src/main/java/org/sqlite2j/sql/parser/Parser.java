@@ -9,6 +9,7 @@ import org.sqlite2j.sql.ast.ColumnExpression;
 import org.sqlite2j.sql.ast.ComparisonExpression;
 import org.sqlite2j.sql.ast.ComparisonOperator;
 import org.sqlite2j.sql.ast.CreateTableStatement;
+import org.sqlite2j.sql.ast.DeleteStatement;
 import org.sqlite2j.sql.ast.Expression;
 import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.LiteralExpression;
@@ -31,7 +32,8 @@ public final class Parser {
     else if (match(TokenType.INSERT)) stmt = parseInsert();
     else if (match(TokenType.SELECT)) stmt = parseSelect();
     else if (match(TokenType.UPDATE)) stmt = parseUpdate();
-    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, SELECT * FROM, and UPDATE are supported");
+    else if (match(TokenType.DELETE)) stmt = parseDelete();
+    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, SELECT * FROM, UPDATE, and DELETE are supported");
 
     if (!check(TokenType.SEMICOLON) && !check(TokenType.EOF)) {
       throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Unsupported clause in Phase 1 near token: " + peek().getLexeme());
@@ -39,6 +41,16 @@ public final class Parser {
     match(TokenType.SEMICOLON);
     consume(TokenType.EOF, SqlErrorCode.UNEXPECTED_TOKEN, "Unexpected trailing input");
     return stmt;
+  }
+
+  private Statement parseDelete() {
+    consume(TokenType.FROM, SqlErrorCode.UNEXPECTED_TOKEN, "Expected FROM after DELETE");
+    String tableName = identifier("Expected table name after DELETE FROM");
+    Expression whereExpression = null;
+    if (match(TokenType.WHERE)) {
+      whereExpression = parseComparisonExpression();
+    }
+    return new DeleteStatement(tableName, whereExpression);
   }
 
   private Statement parseUpdate() {

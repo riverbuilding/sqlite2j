@@ -13,6 +13,7 @@ import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.ComparisonExpression;
 import org.sqlite2j.sql.ast.ComparisonOperator;
+import org.sqlite2j.sql.ast.DeleteStatement;
 import org.sqlite2j.sql.ast.OrderByClause;
 import org.sqlite2j.sql.ast.UpdateStatement;
 
@@ -70,9 +71,25 @@ class ParserTest {
   }
 
   @Test
-  void rejectsUnsupportedStatement() {
-    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("DELETE FROM users;"));
-    assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
+  void parsesDeleteWithoutWhereClause() {
+    var stmt = parser.parse("DELETE FROM users;");
+    var delete = assertInstanceOf(DeleteStatement.class, stmt);
+    assertEquals("users", delete.getTableName());
+    assertEquals(null, delete.getWhereExpression());
+  }
+
+  @Test
+  void parsesDeleteWithWhereClause() {
+    var stmt = parser.parse("DELETE FROM users WHERE id = 1;");
+    var delete = assertInstanceOf(DeleteStatement.class, stmt);
+    assertEquals("users", delete.getTableName());
+    assertInstanceOf(ComparisonExpression.class, delete.getWhereExpression());
+  }
+
+  @Test
+  void rejectsUnsupportedDeleteFormMissingFrom() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("DELETE users;"));
+    assertEquals(SqlErrorCode.UNEXPECTED_TOKEN, ex.getCode());
   }
 
   @Test

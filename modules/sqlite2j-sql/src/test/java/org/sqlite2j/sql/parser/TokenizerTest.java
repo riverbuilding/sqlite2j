@@ -48,4 +48,12 @@ class TokenizerTest {
     assertEquals(TokenType.SET, tokens.get(2).getType());
     assertEquals(TokenType.WHERE, tokens.get(6).getType());
   }
+
+  @Test
+  void tokenizesDeleteKeywords() {
+    List<Token> tokens = tokenizer.tokenize("DELETE FROM t WHERE id = 1;");
+    assertEquals(TokenType.DELETE, tokens.get(0).getType());
+    assertEquals(TokenType.FROM, tokens.get(1).getType());
+    assertEquals(TokenType.WHERE, tokens.get(3).getType());
+  }
 }
