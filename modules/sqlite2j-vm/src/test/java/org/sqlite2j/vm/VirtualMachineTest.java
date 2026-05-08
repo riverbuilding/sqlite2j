@@ -142,4 +142,41 @@ class VirtualMachineTest {
         () -> vm.execute(compiler.compile("SELECT * FROM users WHERE missing = 1;")));
     assertEquals("Unknown column: missing", ex.getMessage());
   }
+
+  @Test
+  void orderByWithUnknownColumnFailsDeterministically() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    RuntimeException ex = assertThrows(RuntimeException.class,
+        () -> vm.execute(compiler.compile("SELECT * FROM users ORDER BY missing;")));
+    assertEquals("Unknown column: missing", ex.getMessage());
+  }
+
+  @Test
+  void updateWhereNoMatchesLeavesRowsUnchanged() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 2;"));
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+  }
+
+  @Test
+  void deleteWhereNoMatchesLeavesRowsUnchanged() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    vm.execute(compiler.compile("DELETE FROM users WHERE id = 2;"));
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals(1, result.getRows().size());
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+  }
 }

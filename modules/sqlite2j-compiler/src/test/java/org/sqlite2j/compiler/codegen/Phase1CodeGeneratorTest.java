@@ -108,6 +108,20 @@ class Phase1CodeGeneratorTest {
     assertIterableEquals(Arrays.asList(Opcode.OPEN_WRITE, Opcode.SCAN_TABLE, Opcode.DELETE_ROWS, Opcode.HALT), opcodesOf(delete));
   }
 
+  @Test
+  void loweredProgramsTargetExpectedTableNames() {
+    Program select = compiler.compile("SELECT * FROM users WHERE id = 1 ORDER BY name DESC;");
+    Program update = compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;");
+    Program delete = compiler.compile("DELETE FROM users WHERE id = 1;");
+
+    assertEquals("users", select.getInstructions().get(0).getP1());
+    assertEquals("users", select.getInstructions().get(1).getP1());
+    assertEquals("users", update.getInstructions().get(0).getP1());
+    assertEquals("users", update.getInstructions().get(1).getP1());
+    assertEquals("users", delete.getInstructions().get(0).getP1());
+    assertEquals("users", delete.getInstructions().get(1).getP1());
+  }
+
   private List<Opcode> opcodesOf(Program program) {
     List<Opcode> opcodes = new java.util.ArrayList<Opcode>();
     for (Instruction instruction : program.getInstructions()) {

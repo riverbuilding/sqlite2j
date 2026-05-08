@@ -149,4 +149,28 @@ class ParserTest {
     assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
   }
 
+  @Test
+  void rejectsSelectWhereWithoutExpression() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("SELECT * FROM users WHERE;"));
+    assertEquals(SqlErrorCode.UNEXPECTED_TOKEN, ex.getCode());
+  }
+
+  @Test
+  void rejectsSelectOrderByWithoutColumn() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("SELECT * FROM users ORDER BY;"));
+    assertEquals(SqlErrorCode.INVALID_IDENTIFIER, ex.getCode());
+  }
+
+  @Test
+  void rejectsUpdateWithoutAssignmentLiteral() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("UPDATE users SET name = ;"));
+    assertEquals(SqlErrorCode.UNEXPECTED_TOKEN, ex.getCode());
+  }
+
+  @Test
+  void rejectsDeleteWithTrailingGarbage() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("DELETE FROM users WHERE id = 1 OOPS;"));
+    assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
+  }
+
 }
