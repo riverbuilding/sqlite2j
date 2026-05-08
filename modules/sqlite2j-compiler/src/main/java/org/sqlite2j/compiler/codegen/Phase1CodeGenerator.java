@@ -49,12 +49,15 @@ public final class Phase1CodeGenerator {
   }
 
   private void emitSelect(Program program, SelectAllStatement stmt) {
+    // Planner heuristic (Phase 2): scan table -> filter rows -> sort rows -> emit rows.
+    // Filter is encoded on SCAN_TABLE and ORDER BY is encoded on RESULT_ROW.
     program.add(Opcode.OPEN_READ, stmt.getTableName(), null);
     program.add(Opcode.SCAN_TABLE, stmt.getTableName(), encodeWhere(stmt.getWhereExpression()));
     program.add(Opcode.RESULT_ROW, "*", encodeOrderBy(stmt.getOrderByClause()));
   }
 
   private void emitUpdate(Program program, UpdateStatement stmt) {
+    // Planner heuristic (Phase 2): scan table -> filter rows -> mutate matching rows.
     UpdateAssignment assignment = stmt.getAssignments().get(0);
     program.add(Opcode.OPEN_WRITE, stmt.getTableName(), null);
     program.add(Opcode.SCAN_TABLE, stmt.getTableName(), encodeWhere(stmt.getWhereExpression()));
@@ -62,6 +65,7 @@ public final class Phase1CodeGenerator {
   }
 
   private void emitDelete(Program program, DeleteStatement stmt) {
+    // Planner heuristic (Phase 2): scan table -> filter rows -> delete matching rows.
     program.add(Opcode.OPEN_WRITE, stmt.getTableName(), null);
     program.add(Opcode.SCAN_TABLE, stmt.getTableName(), encodeWhere(stmt.getWhereExpression()));
     program.add(Opcode.DELETE_ROWS, stmt.getTableName(), null);

@@ -1,6 +1,10 @@
 package org.sqlite2j.compiler.codegen;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
+
+import java.util.Arrays;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -91,5 +95,24 @@ class Phase1CodeGeneratorTest {
         "002 RESULT_ROW * name:ASC\n" +
         "003 HALT - -",
         program.toDeterministicString());
+  }
+
+  @Test
+  void scanFirstHeuristicOpcodeOrderIsStable() {
+    Program select = compiler.compile("SELECT * FROM users WHERE id = 1 ORDER BY name DESC;");
+    Program update = compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;");
+    Program delete = compiler.compile("DELETE FROM users WHERE id = 1;");
+
+    assertIterableEquals(Arrays.asList(Opcode.OPEN_READ, Opcode.SCAN_TABLE, Opcode.RESULT_ROW, Opcode.HALT), opcodesOf(select));
+    assertIterableEquals(Arrays.asList(Opcode.OPEN_WRITE, Opcode.SCAN_TABLE, Opcode.UPDATE_ROWS, Opcode.HALT), opcodesOf(update));
+    assertIterableEquals(Arrays.asList(Opcode.OPEN_WRITE, Opcode.SCAN_TABLE, Opcode.DELETE_ROWS, Opcode.HALT), opcodesOf(delete));
+  }
+
+  private List<Opcode> opcodesOf(Program program) {
+    List<Opcode> opcodes = new java.util.ArrayList<Opcode>();
+    for (Instruction instruction : program.getInstructions()) {
+      opcodes.add(instruction.getOpcode());
+    }
+    return opcodes;
   }
 }
