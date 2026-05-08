@@ -73,4 +73,20 @@ class VirtualMachineTest {
     assertEquals(3L, desc.getRows().get(1).getValues().get(0).getValue());
     assertEquals(2L, desc.getRows().get(2).getValues().get(0).getValue());
   }
+
+  @Test
+  void selectWhereFiltersDuringScanBeforeSorting() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (3, 'carl');"));
+
+    VmResult filtered = vm.execute(compiler.compile("SELECT * FROM users WHERE id >= 2 ORDER BY name ASC;"));
+    assertEquals(2, filtered.getRows().size());
+    assertEquals(2L, filtered.getRows().get(0).getValues().get(0).getValue());
+    assertEquals(3L, filtered.getRows().get(1).getValues().get(0).getValue());
+  }
 }

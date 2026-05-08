@@ -22,6 +22,7 @@ public final class VirtualMachine {
     VmCursor cursor = null;
     VmRow registerRecord = null;
     String openReadTable = null;
+    String currentWhere = null;
 
     for (Instruction instruction : program.getInstructions()) {
       Opcode opcode = instruction.getOpcode();
@@ -38,11 +39,16 @@ public final class VirtualMachine {
         if (registerRecord == null) throw new IllegalStateException("No record available for INSERT_ROW");
         database.insert(instruction.getP1(), registerRecord);
       } else if (opcode == Opcode.SCAN_TABLE) {
-        // scan is consumed by RESULT_ROW for phase 1
+        currentWhere = instruction.getP2();
       } else if (opcode == Opcode.RESULT_ROW) {
         if (cursor == null) throw new IllegalStateException("No open cursor for RESULT_ROW");
         List<VmRow> rows = new ArrayList<VmRow>();
-        while (cursor.next()) rows.add(cursor.current());
+        while (cursor.next()) {
+          VmRow row = cursor.current();
+          if (matchesWhere(openReadTable, row, currentWhere)) {
+            rows.add(row);
+          }
+        }
         sortRowsIfRequested(rows, openReadTable, instruction.getP2());
         for (VmRow row : rows) result.addRow(row);
       } else if (opcode == Opcode.HALT) {
@@ -70,6 +76,43 @@ public final class VirtualMachine {
         return descending ? -cmp : cmp;
       }
     });
+  }
+
+  private boolean matchesWhere(String tableName, VmRow row, String where) {
+    if (where == null || where.isEmpty()) return true;
+    int first = where.indexOf(':');
+    int second = where.indexOf(':', first + 1);
+    if (first <= 0 || second <= first) throw new IllegalStateException("Invalid WHERE encoding: " + where);
+
+    String left = where.substring(0, first);
+    String op = where.substring(first + 1, second);
+    String right = where.substring(second + 1);
+    if (!left.startsWith("C(") || !left.endsWith(")")) throw new IllegalStateException("Invalid WHERE column encoding: " + left);
+    if (!right.startsWith("L(") || !right.endsWith(")")) throw new IllegalStateException("Invalid WHERE literal encoding: " + right);
+
+    String columnName = left.substring(2, left.length() - 1);
+    String literal = right.substring(2, right.length() - 1);
+    int columnIndex = findColumnIndex(tableName, columnName);
+    VmValue leftValue = row.getValues().get(columnIndex);
+    VmValue rightValue = parseEncodedLiteral(literal);
+    return compareByOperator(compareValues(leftValue, rightValue), op);
+  }
+
+  private VmValue parseEncodedLiteral(String literal) {
+    if (literal.startsWith("'") && literal.endsWith("'")) {
+      return VmValue.ofText(literal.substring(1, literal.length() - 1));
+    }
+    return VmValue.ofInt(Long.parseLong(literal));
+  }
+
+  private boolean compareByOperator(int cmp, String operator) {
+    if ("EQ".equals(operator)) return cmp == 0;
+    if ("NE".equals(operator)) return cmp != 0;
+    if ("LT".equals(operator)) return cmp < 0;
+    if ("LTE".equals(operator)) return cmp <= 0;
+    if ("GT".equals(operator)) return cmp > 0;
+    if ("GTE".equals(operator)) return cmp >= 0;
+    throw new IllegalStateException("Unsupported WHERE operator: " + operator);
   }
 
   private int findColumnIndex(String tableName, String columnName) {
