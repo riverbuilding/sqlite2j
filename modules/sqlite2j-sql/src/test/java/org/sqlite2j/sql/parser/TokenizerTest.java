@@ -30,4 +30,14 @@ class TokenizerTest {
     assertEquals(SqlErrorCode.UNTERMINATED_STRING, ex.getCode());
     assertEquals(22, ex.getPosition());
   }
+
+  @Test
+  void tokenizesWhereAndOrderByKeywords() {
+    List<Token> tokens = tokenizer.tokenize("SELECT * FROM t WHERE id >= 1 ORDER BY name DESC;");
+    assertEquals(TokenType.WHERE, tokens.get(4).getType());
+    assertEquals(TokenType.GTE, tokens.get(6).getType());
+    assertEquals(TokenType.ORDER, tokens.get(8).getType());
+    assertEquals(TokenType.BY, tokens.get(9).getType());
+    assertEquals(TokenType.DESC, tokens.get(11).getType());
+  }
 }

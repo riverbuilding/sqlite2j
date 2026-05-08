@@ -50,11 +50,10 @@ class Phase1EndToEndTest {
     Path db = Files.createTempFile("sqlite2j-negative", ".db");
     try (Sqlite2jConnection conn = Sqlite2jConnection.open(db.toString())) {
       executeDone(conn, "CREATE TABLE users (id INT, name TEXT);");
+      executeDone(conn, "INSERT INTO users VALUES (1, 'alice');");
 
-      SqlParseException where = assertThrows(SqlParseException.class,
-          () -> executeDone(conn, "SELECT * FROM users WHERE id = 1;"));
-      assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, where.getCode());
-      assertTrue(where.getMessage().contains("Unsupported clause in Phase 1"));
+      // WHERE syntax is now accepted by the parser as part of Phase 2 expression work.
+      assertEquals(Arrays.asList("1|alice"), collectRows(conn, "SELECT * FROM users WHERE id = 1;"));
 
       SqlParseException update = assertThrows(SqlParseException.class,
           () -> executeDone(conn, "UPDATE users SET name = 'bob';"));

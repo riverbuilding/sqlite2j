@@ -2,6 +2,7 @@ package org.sqlite2j.sql.parser;
 
 public enum TokenType {
   CREATE, TABLE, INSERT, INTO, VALUES, SELECT, FROM,
+  WHERE, ORDER, BY, ASC, DESC,
   STAR, LPAREN, RPAREN, COMMA, SEMICOLON,
   EQUAL, BANG_EQUAL, LT, LTE, GT, GTE,
   NULL, AND, OR,

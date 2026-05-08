@@ -13,6 +13,7 @@ import org.sqlite2j.sql.ast.Expression;
 import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.LiteralExpression;
 import org.sqlite2j.sql.ast.LiteralValue;
+import org.sqlite2j.sql.ast.OrderByClause;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.Statement;
 
@@ -77,7 +78,20 @@ public final class Parser {
     consume(TokenType.STAR, SqlErrorCode.UNEXPECTED_TOKEN, "Expected '*' after SELECT");
     consume(TokenType.FROM, SqlErrorCode.UNEXPECTED_TOKEN, "Expected FROM after SELECT *");
     String tableName = identifier("Expected table name after FROM");
-    return new SelectAllStatement(tableName);
+    Expression whereExpression = null;
+    OrderByClause orderByClause = null;
+    if (match(TokenType.WHERE)) {
+      whereExpression = parseComparisonExpression();
+    }
+    if (match(TokenType.ORDER)) {
+      consume(TokenType.BY, SqlErrorCode.UNEXPECTED_TOKEN, "Expected BY after ORDER");
+      String orderColumn = identifier("Expected column name after ORDER BY");
+      boolean descending = false;
+      if (match(TokenType.DESC)) descending = true;
+      else match(TokenType.ASC);
+      orderByClause = new OrderByClause(orderColumn, descending);
+    }
+    return new SelectAllStatement(tableName, whereExpression, orderByClause);
   }
 
   private Object parseLiteral() {

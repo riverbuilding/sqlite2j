@@ -87,6 +87,11 @@ public final class Tokenizer {
       case "VALUES" -> TokenType.VALUES;
       case "SELECT" -> TokenType.SELECT;
       case "FROM" -> TokenType.FROM;
+      case "WHERE" -> TokenType.WHERE;
+      case "ORDER" -> TokenType.ORDER;
+      case "BY" -> TokenType.BY;
+      case "ASC" -> TokenType.ASC;
+      case "DESC" -> TokenType.DESC;
       case "NULL" -> TokenType.NULL;
       case "AND" -> TokenType.AND;
       case "OR" -> TokenType.OR;

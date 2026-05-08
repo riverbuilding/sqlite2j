@@ -13,6 +13,7 @@ import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.ComparisonExpression;
 import org.sqlite2j.sql.ast.ComparisonOperator;
+import org.sqlite2j.sql.ast.OrderByClause;
 
 class ParserTest {
   private final Parser parser = new Parser();
@@ -41,9 +42,21 @@ class ParserTest {
   }
 
   @Test
-  void rejectsUnsupportedWhereClause() {
-    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("SELECT * FROM users WHERE id = 1;"));
-    assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
+  void parsesSelectWithWhereClause() {
+    var stmt = parser.parse("SELECT * FROM users WHERE id = 1;");
+    var select = assertInstanceOf(SelectAllStatement.class, stmt);
+    assertEquals("users", select.getTableName());
+    assertInstanceOf(ComparisonExpression.class, select.getWhereExpression());
+  }
+
+  @Test
+  void parsesSelectWithWhereAndOrderBy() {
+    var stmt = parser.parse("SELECT * FROM users WHERE id >= 1 ORDER BY name DESC;");
+    var select = assertInstanceOf(SelectAllStatement.class, stmt);
+    assertInstanceOf(ComparisonExpression.class, select.getWhereExpression());
+    OrderByClause orderBy = select.getOrderByClause();
+    assertEquals("name", orderBy.getColumnName());
+    assertEquals(true, orderBy.isDescending());
   }
 
   @Test
