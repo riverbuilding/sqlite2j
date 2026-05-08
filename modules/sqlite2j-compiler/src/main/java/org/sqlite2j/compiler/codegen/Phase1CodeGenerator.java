@@ -76,9 +76,19 @@ public final class Phase1CodeGenerator {
     if (expression == null) return null;
     if (expression instanceof ComparisonExpression) {
       ComparisonExpression comparison = (ComparisonExpression) expression;
+      validateLowerableComparison(comparison);
       return encodeOperand(comparison.getLeft()) + ":" + comparison.getOperator().name() + ":" + encodeOperand(comparison.getRight());
     }
     throw new IllegalArgumentException("Unsupported WHERE expression type: " + expression.getClass().getName());
+  }
+
+  private void validateLowerableComparison(ComparisonExpression comparison) {
+    if (!(comparison.getLeft() instanceof ColumnExpression)) {
+      throw new IllegalArgumentException("WHERE left operand must be a column reference");
+    }
+    if (!(comparison.getRight() instanceof LiteralExpression)) {
+      throw new IllegalArgumentException("WHERE right operand must be a literal value");
+    }
   }
 
   private String encodeOperand(Expression expression) {

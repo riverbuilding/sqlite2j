@@ -81,4 +81,15 @@ class Phase1CodeGeneratorTest {
         "003 HALT - -",
         program.toDeterministicString());
   }
+
+  @Test
+  void selectWhereOrderByGoldenProgram() {
+    Program program = compiler.compile("SELECT * FROM users WHERE id = 1 ORDER BY name ASC;");
+    assertEquals(
+        "000 OPEN_READ users -\n" +
+        "001 SCAN_TABLE users C(id):EQ:L(1)\n" +
+        "002 RESULT_ROW * name:ASC\n" +
+        "003 HALT - -",
+        program.toDeterministicString());
+  }
 }
