@@ -48,4 +48,37 @@ class Phase1CodeGeneratorTest {
         "003 HALT - -",
         program.toDeterministicString());
   }
+
+  @Test
+  void selectWhereGoldenProgram() {
+    Program program = compiler.compile("SELECT * FROM users WHERE id = 1;");
+    assertEquals(
+        "000 OPEN_READ users -\n" +
+        "001 SCAN_TABLE users C(id):EQ:L(1)\n" +
+        "002 RESULT_ROW * -\n" +
+        "003 HALT - -",
+        program.toDeterministicString());
+  }
+
+  @Test
+  void updateWhereGoldenProgram() {
+    Program program = compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;");
+    assertEquals(
+        "000 OPEN_WRITE users -\n" +
+        "001 SCAN_TABLE users C(id):EQ:L(1)\n" +
+        "002 UPDATE_ROWS name 'bob'\n" +
+        "003 HALT - -",
+        program.toDeterministicString());
+  }
+
+  @Test
+  void deleteWhereGoldenProgram() {
+    Program program = compiler.compile("DELETE FROM users WHERE id = 1;");
+    assertEquals(
+        "000 OPEN_WRITE users -\n" +
+        "001 SCAN_TABLE users C(id):EQ:L(1)\n" +
+        "002 DELETE_ROWS users -\n" +
+        "003 HALT - -",
+        program.toDeterministicString());
+  }
 }

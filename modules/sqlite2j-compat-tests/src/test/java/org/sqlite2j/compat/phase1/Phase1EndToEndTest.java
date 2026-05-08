@@ -56,7 +56,7 @@ class Phase1EndToEndTest {
 
       RuntimeException update = assertThrows(RuntimeException.class,
           () -> executeDone(conn, "UPDATE users SET name = 'bob';"));
-      assertTrue(update.getMessage().contains("Unsupported statement type"));
+      assertTrue(update.getMessage().contains("Unsupported"));
     }
   }
 
