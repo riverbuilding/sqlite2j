@@ -1,6 +1,8 @@
 package org.sqlite2j.vm;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import org.sqlite2j.compiler.codegen.Instruction;
 import org.sqlite2j.compiler.codegen.Opcode;
@@ -19,6 +21,7 @@ public final class VirtualMachine {
     VmResult result = new VmResult();
     VmCursor cursor = null;
     VmRow registerRecord = null;
+    String openReadTable = null;
 
     for (Instruction instruction : program.getInstructions()) {
       Opcode opcode = instruction.getOpcode();
@@ -27,6 +30,7 @@ public final class VirtualMachine {
       } else if (opcode == Opcode.OPEN_WRITE) {
         // placeholder: writes target table via INSERT_ROW p1
       } else if (opcode == Opcode.OPEN_READ) {
+        openReadTable = instruction.getP1();
         cursor = database.openReadCursor(instruction.getP1());
       } else if (opcode == Opcode.MAKE_RECORD) {
         registerRecord = new VmRow(parseValues(instruction.getP1()));
@@ -37,7 +41,10 @@ public final class VirtualMachine {
         // scan is consumed by RESULT_ROW for phase 1
       } else if (opcode == Opcode.RESULT_ROW) {
         if (cursor == null) throw new IllegalStateException("No open cursor for RESULT_ROW");
-        while (cursor.next()) result.addRow(cursor.current());
+        List<VmRow> rows = new ArrayList<VmRow>();
+        while (cursor.next()) rows.add(cursor.current());
+        sortRowsIfRequested(rows, openReadTable, instruction.getP2());
+        for (VmRow row : rows) result.addRow(row);
       } else if (opcode == Opcode.HALT) {
         break;
       } else {
@@ -45,6 +52,47 @@ public final class VirtualMachine {
       }
     }
     return result;
+  }
+
+  private void sortRowsIfRequested(List<VmRow> rows, String tableName, String orderBy) {
+    if (orderBy == null || orderBy.isEmpty()) return;
+    if (tableName == null) throw new IllegalStateException("No open table for ORDER BY");
+    String[] parts = orderBy.split(":", 2);
+    if (parts.length != 2) throw new IllegalStateException("Invalid ORDER BY encoding: " + orderBy);
+    int index = findColumnIndex(tableName, parts[0]);
+    final boolean descending = "DESC".equalsIgnoreCase(parts[1]);
+    Collections.sort(rows, new Comparator<VmRow>() {
+      @Override
+      public int compare(VmRow a, VmRow b) {
+        VmValue left = a.getValues().get(index);
+        VmValue right = b.getValues().get(index);
+        int cmp = compareValues(left, right);
+        return descending ? -cmp : cmp;
+      }
+    });
+  }
+
+  private int findColumnIndex(String tableName, String columnName) {
+    TableSchema schema = database.getSchemaRegistry().findTable(tableName)
+        .orElseThrow(() -> new IllegalStateException("Table not found: " + tableName));
+    for (int i = 0; i < schema.getColumns().size(); i++) {
+      if (schema.getColumns().get(i).getName().equalsIgnoreCase(columnName)) return i;
+    }
+    throw new IllegalStateException("Unknown ORDER BY column: " + columnName);
+  }
+
+  private int compareValues(VmValue left, VmValue right) {
+    if (left.getType() == VmValue.Type.NULL && right.getType() == VmValue.Type.NULL) return 0;
+    if (left.getType() == VmValue.Type.NULL) return -1;
+    if (right.getType() == VmValue.Type.NULL) return 1;
+    if (left.getType() == VmValue.Type.INT && right.getType() == VmValue.Type.INT) {
+      return Long.compare((Long) left.getValue(), (Long) right.getValue());
+    }
+    if (left.getType() == VmValue.Type.TEXT && right.getType() == VmValue.Type.TEXT) {
+      return ((String) left.getValue()).compareTo((String) right.getValue());
+    }
+    // deterministic mixed-type ordering for now: INT before TEXT
+    return left.getType().ordinal() - right.getType().ordinal();
   }
 
   private List<ColumnDef> parseColumns(String encoded) {

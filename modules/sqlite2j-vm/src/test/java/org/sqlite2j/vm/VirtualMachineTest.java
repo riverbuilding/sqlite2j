@@ -52,4 +52,25 @@ class VirtualMachineTest {
         () -> vm.execute(compiler.compile("CREATE TABLE t (id INT);")));
     assertEquals("Table already exists: t", ex.getMessage());
   }
+
+  @Test
+  void selectOrderByUsesDeterministicSortAndStableTies() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);") );
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'bob');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (3, 'bob');"));
+
+    VmResult asc = vm.execute(compiler.compile("SELECT * FROM users ORDER BY name ASC;"));
+    assertEquals(2L, asc.getRows().get(0).getValues().get(0).getValue());
+    assertEquals(1L, asc.getRows().get(1).getValues().get(0).getValue());
+    assertEquals(3L, asc.getRows().get(2).getValues().get(0).getValue());
+
+    VmResult desc = vm.execute(compiler.compile("SELECT * FROM users ORDER BY name DESC;"));
+    assertEquals(1L, desc.getRows().get(0).getValues().get(0).getValue());
+    assertEquals(3L, desc.getRows().get(1).getValues().get(0).getValue());
+    assertEquals(2L, desc.getRows().get(2).getValues().get(0).getValue());
+  }
 }

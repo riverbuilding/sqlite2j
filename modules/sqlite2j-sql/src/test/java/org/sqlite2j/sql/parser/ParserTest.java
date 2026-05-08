@@ -60,6 +60,15 @@ class ParserTest {
   }
 
   @Test
+  void parsesSelectWithOrderByDefaultAscending() {
+    var stmt = parser.parse("SELECT * FROM users ORDER BY name;");
+    var select = assertInstanceOf(SelectAllStatement.class, stmt);
+    OrderByClause orderBy = select.getOrderByClause();
+    assertEquals("name", orderBy.getColumnName());
+    assertEquals(false, orderBy.isDescending());
+  }
+
+  @Test
   void rejectsUnsupportedStatement() {
     SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("DELETE FROM users;"));
     assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());

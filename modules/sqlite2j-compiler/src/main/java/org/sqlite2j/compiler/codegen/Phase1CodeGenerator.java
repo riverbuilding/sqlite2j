@@ -6,6 +6,7 @@ import org.sqlite2j.sql.ast.ColumnDef;
 import org.sqlite2j.sql.ast.CreateTableStatement;
 import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.LiteralValue;
+import org.sqlite2j.sql.ast.OrderByClause;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.Statement;
 
@@ -39,7 +40,12 @@ public final class Phase1CodeGenerator {
   private void emitSelect(Program program, SelectAllStatement stmt) {
     program.add(Opcode.OPEN_READ, stmt.getTableName(), null);
     program.add(Opcode.SCAN_TABLE, stmt.getTableName(), null);
-    program.add(Opcode.RESULT_ROW, "*", null);
+    program.add(Opcode.RESULT_ROW, "*", encodeOrderBy(stmt.getOrderByClause()));
+  }
+
+  private String encodeOrderBy(OrderByClause orderByClause) {
+    if (orderByClause == null) return null;
+    return orderByClause.getColumnName() + ":" + (orderByClause.isDescending() ? "DESC" : "ASC");
   }
 
   private String encodeColumns(List<ColumnDef> columns) {
