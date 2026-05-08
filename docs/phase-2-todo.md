@@ -169,29 +169,29 @@ Suggested AST candidates:
 ## 7. Test Plan
 
 ### 7.1 Parser tests
-- [ ] Add valid and invalid SQL coverage for WHERE/ORDER BY/UPDATE/DELETE.
+- [x] Add valid and invalid SQL coverage for WHERE/ORDER BY/UPDATE/DELETE.
 
 ### 7.2 Compiler tests
-- [ ] Assert opcode order and table targeting.
+- [x] Assert opcode order and table targeting.
 
 ### 7.3 VM tests
-- [ ] Add behavior tests for filter/sort/update/delete including edge cases.
+- [x] Add behavior tests for filter/sort/update/delete including edge cases.
 
 ### 7.4 End-to-end tests
-- [ ] Add focused end-to-end SQL behavior tests.
+- [x] Add focused end-to-end SQL behavior tests.
 
 ## 8. Milestone Order
-1. Expression foundation.
-2. `WHERE`.
-3. `ORDER BY`.
-4. `DELETE`.
-5. `UPDATE`.
-6. Cleanup + exit criteria.
+1. [x] Expression foundation.
+2. [x] `WHERE`.
+3. [x] `ORDER BY`.
+4. [x] `DELETE`.
+5. [x] `UPDATE`.
+6. [x] Cleanup + exit criteria.
 
 ## 9. Exit Criteria
-- [ ] WHERE works for supported comparison operators.
-- [ ] ORDER BY works deterministically for supported value types.
-- [ ] UPDATE and DELETE mutate only matching rows.
-- [ ] Unsupported SQL fails deterministically.
-- [ ] No non-goal features added.
-- [ ] `mvn test` passes before completion of implementation work.
+- [x] WHERE works for supported comparison operators.
+- [x] ORDER BY works deterministically for supported value types.
+- [x] UPDATE and DELETE mutate only matching rows.
+- [x] Unsupported SQL fails deterministically.
+- [x] No non-goal features added.
+- [x] `mvn test` passes before completion of implementation work.
