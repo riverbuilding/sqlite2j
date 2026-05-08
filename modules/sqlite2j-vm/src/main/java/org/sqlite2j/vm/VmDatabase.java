@@ -48,6 +48,20 @@ public final class VmDatabase {
     return new VmCursor(rows);
   }
 
+  public List<VmRow> rowsView(String tableName) {
+    List<VmRow> rows = tableRows.get(normalize(tableName));
+    if (rows == null) throw new IllegalStateException("Table not found: " + tableName);
+    return rows;
+  }
+
+  public void replaceRows(String tableName, List<VmRow> rows) {
+    if (!tableRows.containsKey(normalize(tableName))) {
+      throw new IllegalStateException("Table not found: " + tableName);
+    }
+    tableRows.put(normalize(tableName), new ArrayList<VmRow>(rows));
+    save();
+  }
+
   private void load() {
     try {
       if (!Files.exists(catalogPath) || Files.size(catalogPath) == 0) return;
