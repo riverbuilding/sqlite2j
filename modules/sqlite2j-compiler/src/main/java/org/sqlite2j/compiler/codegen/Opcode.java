@@ -7,7 +7,6 @@ public enum Opcode {
   MAKE_RECORD,
   INSERT_ROW,
   SCAN_TABLE,
-  FILTER,
   UPDATE_ROWS,
   DELETE_ROWS,
   RESULT_ROW,
