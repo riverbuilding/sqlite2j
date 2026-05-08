@@ -14,6 +14,7 @@ import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.ComparisonExpression;
 import org.sqlite2j.sql.ast.ComparisonOperator;
 import org.sqlite2j.sql.ast.OrderByClause;
+import org.sqlite2j.sql.ast.UpdateStatement;
 
 class ParserTest {
   private final Parser parser = new Parser();
@@ -72,6 +73,24 @@ class ParserTest {
   void rejectsUnsupportedStatement() {
     SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("DELETE FROM users;"));
     assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
+  }
+
+  @Test
+  void parsesUpdateWithSingleLiteralAssignment() {
+    var stmt = parser.parse("UPDATE users SET name = 'bob';");
+    var update = assertInstanceOf(UpdateStatement.class, stmt);
+    assertEquals("users", update.getTableName());
+    assertEquals(1, update.getAssignments().size());
+    assertEquals("name", update.getAssignments().get(0).getColumnName());
+    assertEquals("bob", update.getAssignments().get(0).getValue().getValue());
+  }
+
+  @Test
+  void parsesUpdateWithWhereClause() {
+    var stmt = parser.parse("UPDATE users SET name = 'bob' WHERE id = 1;");
+    var update = assertInstanceOf(UpdateStatement.class, stmt);
+    assertEquals("users", update.getTableName());
+    assertInstanceOf(ComparisonExpression.class, update.getWhereExpression());
   }
 
   @Test

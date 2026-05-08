@@ -16,6 +16,8 @@ import org.sqlite2j.sql.ast.LiteralValue;
 import org.sqlite2j.sql.ast.OrderByClause;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.Statement;
+import org.sqlite2j.sql.ast.UpdateAssignment;
+import org.sqlite2j.sql.ast.UpdateStatement;
 
 public final class Parser {
   private List<Token> tokens;
@@ -28,7 +30,8 @@ public final class Parser {
     if (match(TokenType.CREATE)) stmt = parseCreateTable();
     else if (match(TokenType.INSERT)) stmt = parseInsert();
     else if (match(TokenType.SELECT)) stmt = parseSelect();
-    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, and SELECT * FROM are supported in Phase 1");
+    else if (match(TokenType.UPDATE)) stmt = parseUpdate();
+    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, SELECT * FROM, and UPDATE are supported");
 
     if (!check(TokenType.SEMICOLON) && !check(TokenType.EOF)) {
       throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Unsupported clause in Phase 1 near token: " + peek().getLexeme());
@@ -36,6 +39,22 @@ public final class Parser {
     match(TokenType.SEMICOLON);
     consume(TokenType.EOF, SqlErrorCode.UNEXPECTED_TOKEN, "Unexpected trailing input");
     return stmt;
+  }
+
+  private Statement parseUpdate() {
+    String tableName = identifier("Expected table name after UPDATE");
+    consume(TokenType.SET, SqlErrorCode.UNEXPECTED_TOKEN, "Expected SET after UPDATE table name");
+    String columnName = identifier("Expected column name in UPDATE assignment");
+    consume(TokenType.EQUAL, SqlErrorCode.UNEXPECTED_TOKEN, "Expected '=' in UPDATE assignment");
+    LiteralValue literalValue = new LiteralValue(parseLiteral());
+    List<UpdateAssignment> assignments = new ArrayList<UpdateAssignment>();
+    assignments.add(new UpdateAssignment(columnName, literalValue));
+
+    Expression whereExpression = null;
+    if (match(TokenType.WHERE)) {
+      whereExpression = parseComparisonExpression();
+    }
+    return new UpdateStatement(tableName, assignments, whereExpression);
   }
 
   public Expression parseExpression(String sql) {

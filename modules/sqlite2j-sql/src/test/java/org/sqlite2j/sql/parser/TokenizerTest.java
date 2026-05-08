@@ -40,4 +40,12 @@ class TokenizerTest {
     assertEquals(TokenType.BY, tokens.get(9).getType());
     assertEquals(TokenType.DESC, tokens.get(11).getType());
   }
+
+  @Test
+  void tokenizesUpdateSetKeywords() {
+    List<Token> tokens = tokenizer.tokenize("UPDATE t SET name = 'bob' WHERE id = 1;");
+    assertEquals(TokenType.UPDATE, tokens.get(0).getType());
+    assertEquals(TokenType.SET, tokens.get(2).getType());
+    assertEquals(TokenType.WHERE, tokens.get(6).getType());
+  }
 }

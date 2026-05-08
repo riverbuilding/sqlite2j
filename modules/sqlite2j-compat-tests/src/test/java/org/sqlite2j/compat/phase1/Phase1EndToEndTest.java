@@ -13,7 +13,6 @@ import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.sqlite2j.sql.SqlErrorCode;
-import org.sqlite2j.sql.SqlParseException;
 import org.sqlite2j.vm.api.Sqlite2jConnection;
 import org.sqlite2j.vm.api.Sqlite2jStatement;
 import org.sqlite2j.vm.api.StepResult;
@@ -55,10 +54,9 @@ class Phase1EndToEndTest {
       // WHERE syntax is now accepted by the parser as part of Phase 2 expression work.
       assertEquals(Arrays.asList("1|alice"), collectRows(conn, "SELECT * FROM users WHERE id = 1;"));
 
-      SqlParseException update = assertThrows(SqlParseException.class,
+      RuntimeException update = assertThrows(RuntimeException.class,
           () -> executeDone(conn, "UPDATE users SET name = 'bob';"));
-      assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, update.getCode());
-      assertTrue(update.getMessage().contains("Only CREATE TABLE, INSERT INTO, and SELECT * FROM"));
+      assertTrue(update.getMessage().contains("Unsupported statement type"));
     }
   }
 
