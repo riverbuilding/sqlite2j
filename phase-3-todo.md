@@ -432,11 +432,46 @@
 
 ## 8) Non-goals for Phase 3 (to prevent scope creep)
 
-- [ ] No WAL mode
-- [ ] No concurrency control beyond current baseline
-- [ ] No savepoints/nested transactions
-- [ ] No journal format optimization beyond correctness
-- [ ] No speculative abstractions not used by production path
+### 8.1 Concurrency and locking non-goals (decided)
+
+- [x] No multi-writer transaction support.
+- [x] No advanced lock-mode negotiation beyond current baseline behavior.
+- [x] No deadlock detection subsystem work in Phase 3.
+
+### 8.2 Transaction feature non-goals (decided)
+
+- [x] No nested transactions.
+- [x] No savepoints.
+- [x] No partial rollback-to-savepoint semantics.
+- [x] No distributed or cross-database transaction coordination.
+
+### 8.3 Storage/journaling non-goals (decided)
+
+- [x] No WAL mode implementation in Phase 3.
+- [x] No journal compression/encryption features.
+- [x] No journal format optimization beyond correctness-first minimum.
+- [x] No speculative checksum scheme unless required to close a concrete correctness gap.
+
+### 8.4 Performance non-goals (decided)
+
+- [x] No group commit.
+- [x] No batched fsync/write-combining optimization passes.
+- [x] No opportunistic deferred journaling.
+- [x] No performance tuning that weakens journal-before-overwrite guarantees.
+
+### 8.5 SQL surface non-goals (decided)
+
+- [x] No expanded transaction-control syntax beyond currently scoped `BEGIN`/`COMMIT`/`ROLLBACK` behavior.
+- [x] No semantic differentiation of `BEGIN DEFERRED/IMMEDIATE/EXCLUSIVE` in Phase 3.
+- [x] No compatibility emulation for unsupported advanced transaction SQL features.
+
+### 8.6 Architecture/process non-goals (decided)
+
+- [x] No introduction of broad new abstractions/frameworks without direct Phase 3 production necessity.
+- [x] No large golden-test corpus expansion beyond tests required for Phase 3 correctness behavior.
+- [x] No unrelated refactors bundled into Phase 3 transaction PRs.
+
+---
 
 ## 9) Definition of done for Phase 3
 
