@@ -1,5 +1,6 @@
 package org.sqlite2j.vm;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -154,6 +155,50 @@ class VirtualMachineTest {
         () -> vm.execute(compiler.compile("SELECT * FROM users ORDER BY missing;")));
     assertEquals("Unknown column: missing", ex.getMessage());
   }
+
+  @Test
+  void firstMutationInTransactionCreatesJournalBeforeOverwrite() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    byte[] before = Files.readAllBytes(dbPath);
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    org.sqlite2j.journal.RollbackJournalFile journal = new org.sqlite2j.journal.RollbackJournalFile();
+    org.sqlite2j.journal.ParsedJournal parsed = journal.parse(journalPath);
+
+    assertEquals(1, parsed.getRecords().size());
+    assertEquals(Math.max(1, before.length), parsed.getHeader().getPageSize());
+    byte[] expected = new byte[Math.max(1, before.length)];
+    System.arraycopy(before, 0, expected, 0, Math.min(before.length, expected.length));
+    assertArrayEquals(expected, parsed.getRecords().get(0).getPreimage());
+  }
+
+  @Test
+  void repeatedMutationsInSameTransactionDoNotDuplicatePreimage() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'carl' WHERE id = 1;"));
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    org.sqlite2j.journal.RollbackJournalFile journal = new org.sqlite2j.journal.RollbackJournalFile();
+    org.sqlite2j.journal.ParsedJournal parsed = journal.parse(journalPath);
+    assertEquals(1, parsed.getRecords().size());
+  }
+
 
   @Test
   void transactionStateTransitionsAreDeterministic() throws Exception {

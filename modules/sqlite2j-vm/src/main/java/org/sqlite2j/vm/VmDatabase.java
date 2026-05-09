@@ -29,6 +29,8 @@ public final class VmDatabase {
 
   public SchemaRegistry getSchemaRegistry() { return schemaRegistry; }
 
+  Path catalogPath() { return catalogPath; }
+
   public void createTable(TableSchema schema) {
     schemaRegistry.registerTable(schema);
     tableRows.put(normalize(schema.getName()), new ArrayList<VmRow>());

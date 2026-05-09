@@ -21,6 +21,11 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>org.sqlite2j</groupId>
+      <artifactId>sqlite2j-journal</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
