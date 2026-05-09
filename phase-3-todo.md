@@ -475,9 +475,47 @@
 
 ## 9) Definition of done for Phase 3
 
-- [ ] `BEGIN`, `COMMIT`, `ROLLBACK` functionally correct
-- [ ] Rollback journal guarantees atomic rollback semantics
-- [ ] Crash recovery on reopen works for defined crash points
-- [ ] Behavior documented (including limitations)
-- [ ] Full test suite passes with:
+### 9.1 Functional completion criteria (planned)
+
+- [ ] `BEGIN`, `COMMIT`, and `ROLLBACK` are implemented and wired through parser/planner/executor paths.
+- [ ] Explicit transaction state transitions conform to defined state machine contracts.
+- [ ] Invalid transaction command usage returns deterministic, state-derived errors.
+
+### 9.2 Journaling correctness criteria (planned)
+
+- [ ] Rollback journal capture uses first-preimage-only behavior per page per transaction.
+- [ ] Journal-before-database overwrite ordering is enforced for all transaction writes.
+- [ ] Commit finalization follows required ordering and cannot report success ambiguously.
+- [ ] Rollback finalization restores pre-transaction state and cleans journal artifacts.
+
+### 9.3 Crash recovery completion criteria (planned)
+
+- [ ] Reopen logic correctly distinguishes `COMMITTED`, `INCOMPLETE`, and invalid journal states.
+- [ ] Recovery replay restores exact pre-transaction state for incomplete transactions.
+- [ ] Recovery behavior is idempotent across interrupted reopen/recovery attempts.
+- [ ] Ambiguous/corrupt journal conditions fail closed with integrity-preserving behavior.
+
+### 9.4 Test completion criteria (planned)
+
+- [ ] Unit tests cover state transitions and invalid command matrix.
+- [ ] Integration tests cover commit persistence and rollback discard semantics.
+- [ ] Crash-simulation tests cover defined crash windows and expected reopen outcomes.
+- [ ] Reopen/recovery tests cover clean, incomplete, committed-stale, and malformed journal scenarios.
+- [ ] Negative/error-contract tests verify deterministic mapping and no partial state mutation.
+
+### 9.5 Build and compatibility gates (required)
+
+- [x] Implementation must remain JDK 15 compatible.
+- [ ] Full repository test suite passes with:
   - [ ] `mvn test`
+- [ ] Existing pre-Phase-3 compatibility tests remain green (no regressions).
+
+### 9.6 Scope and quality gates (required)
+
+- [ ] No Phase 3 non-goals are silently implemented.
+- [ ] No speculative abstractions are introduced without direct production need.
+- [ ] User-visible behavior limits and known constraints are documented.
+
+### 9.7 Final acceptance rule (required)
+
+- [ ] Phase 3 is complete only when all sections above are satisfied together; partial completion of implementation without recovery/test gates does not qualify as done.
