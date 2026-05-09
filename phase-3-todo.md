@@ -126,14 +126,68 @@
 
 ## 3) Transaction state machine (engine-level behavior)
 
-- [ ] Design internal transaction state transitions:
-  - `IDLE -> IN_TXN -> COMMITTING -> IDLE`
-  - `IN_TXN -> ROLLING_BACK -> IDLE`
-- [ ] Define invalid command handling:
-  - `COMMIT` with no active transaction
-  - `ROLLBACK` with no active transaction
-  - `BEGIN` while already in transaction
-- [ ] Define what operations are legal in each state and expected errors
+### 3.1 Internal states (decided)
+
+- [x] `IDLE`
+  - No explicit transaction is active.
+  - Statements execute under existing autocommit baseline behavior.
+
+- [x] `IN_TXN`
+  - Explicit transaction is active after successful `BEGIN`.
+  - Page mutations are tracked against rollback journal rules.
+
+- [x] `COMMITTING`
+  - Transitional internal state entered only during commit finalization.
+  - No new SQL statement may begin while this transition is in progress.
+
+- [x] `ROLLING_BACK`
+  - Transitional internal state entered only during rollback replay/finalization.
+  - No new SQL statement may begin while this transition is in progress.
+
+### 3.2 State transitions (decided)
+
+- [x] Primary transitions:
+  - `IDLE -> IN_TXN` on successful `BEGIN`
+  - `IN_TXN -> COMMITTING -> IDLE` on successful `COMMIT`
+  - `IN_TXN -> ROLLING_BACK -> IDLE` on successful `ROLLBACK`
+
+- [x] Failure-path transitions:
+  - `IN_TXN -> ROLLING_BACK -> IDLE` if commit encounters a correctness-threatening failure before finalization can be completed.
+  - `COMMITTING -> IDLE` only after commit finalization outcome is unambiguous.
+  - `ROLLING_BACK -> IDLE` only after rollback restore/finalization completes or an integrity-preserving hard failure is raised.
+
+### 3.3 Command validity matrix (decided)
+
+- [x] In `IDLE`:
+  - `BEGIN`: valid, enters `IN_TXN`.
+  - `COMMIT`: invalid, return explicit "no active transaction" error.
+  - `ROLLBACK`: invalid, return explicit "no active transaction" error.
+
+- [x] In `IN_TXN`:
+  - `BEGIN`: invalid, return explicit "transaction already active" error.
+  - `COMMIT`: valid, enters `COMMITTING`.
+  - `ROLLBACK`: valid, enters `ROLLING_BACK`.
+
+- [x] In `COMMITTING` or `ROLLING_BACK`:
+  - `BEGIN`, `COMMIT`, and `ROLLBACK` are all invalid for user-level re-entry.
+  - Engine surfaces a busy/illegal-state style transaction error (exact wording to be fixed during implementation).
+
+### 3.4 Operation legality by state (decided)
+
+- [x] Reads in `IN_TXN` use in-memory/current transaction view consistent with existing engine architecture.
+- [x] Writes in `IN_TXN` are allowed and must follow journal-before-overwrite ordering.
+- [x] No writes are accepted once state enters `COMMITTING` or `ROLLING_BACK` except internal recovery/finalization work.
+- [x] Any unrecoverable I/O/state inconsistency during transition states must prefer integrity-preserving failure over continuing normal execution.
+
+### 3.5 Error contract principles (decided)
+
+- [x] Transaction-state misuse errors are deterministic and state-derived (not best-effort).
+- [x] Errors for invalid transaction commands do not mutate state.
+- [x] On transition failure, externally visible state after error must be either:
+  - Clean `IDLE` with no partial transaction effects, or
+  - Explicit failure requiring reopen/recovery; never silent partial success.
+
+---
 
 ## 4) Write path ordering rules (correctness before optimization)
 
