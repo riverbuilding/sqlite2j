@@ -3,12 +3,23 @@
 > This checklist translates `docs/phase-3-todo.md` design decisions into implementation steps.
 > Do not treat this as feature-complete until Section 9 gates pass.
 
-## 0) Execution rules
+## 0) Execution rules (decided)
 
-- [ ] Keep implementation compatible with **JDK 15**.
-- [ ] Implement only what is required for current production behavior in Phase 3.
-- [ ] Prefer minimal correctness-first behavior over optimization.
-- [ ] Run `mvn test` before each merge-ready checkpoint.
+- [x] **JDK compatibility gate**
+  - Every Phase 3 change must compile and run on **JDK 15**.
+  - Any Java 16+ language or library feature is disallowed.
+
+- [x] **Minimum necessary production scope**
+  - Implement only behavior required for Phase 3 transaction correctness (`BEGIN`/`COMMIT`/`ROLLBACK` + rollback journal).
+  - Do not add speculative abstractions, storage infrastructure, or "future" extension points unless immediately required by production behavior in the same step.
+
+- [x] **Correctness-first over optimization**
+  - Preserve journal-before-overwrite and recovery correctness even when this increases I/O or reduces throughput.
+  - Defer performance tuning (batching/group-commit/fast paths) until after correctness gates are passing.
+
+- [x] **Validation cadence**
+  - Run `mvn test` at each merge-ready checkpoint and before finalizing any Phase 3 implementation PR.
+  - A checkpoint is not complete if tests are not green.
 
 ---
 
