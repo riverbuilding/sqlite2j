@@ -1,9 +1,7 @@
 package org.sqlite2j.journal;
 
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
@@ -22,9 +20,8 @@ public final class RollbackJournalFile {
 
   public void create(Path journalPath, int pageSize) throws IOException {
     validatePageSize(pageSize);
-    try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(journalPath))) {
-      writeHeader(out, new JournalHeader(VERSION, pageSize, 0, CommitMarker.INCOMPLETE));
-    }
+    ByteBuffer header = encodeHeader(new JournalHeader(VERSION, pageSize, 0, CommitMarker.INCOMPLETE));
+    Files.write(journalPath, header.array());
   }
 
   public void appendPageRecord(Path journalPath, int pageNumber, byte[] preimageBytes, int pageSize) throws IOException {
@@ -34,60 +31,65 @@ public final class RollbackJournalFile {
       throw new IllegalArgumentException("Invalid preimage length: " + (preimageBytes == null ? -1 : preimageBytes.length));
     }
 
+    ByteBuffer record = ByteBuffer.allocate(8 + preimageBytes.length);
+    record.putInt(pageNumber);
+    record.putInt(preimageBytes.length);
+    record.put(preimageBytes);
+
     OpenOption[] options = new OpenOption[] {StandardOpenOption.APPEND};
-    try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(journalPath, options))) {
-      out.writeInt(pageNumber);
-      out.writeInt(preimageBytes.length);
-      out.write(preimageBytes);
-    }
+    Files.write(journalPath, record.array(), options);
   }
 
   public ParsedJournal parse(Path journalPath) throws IOException {
-    try (DataInputStream in = new DataInputStream(Files.newInputStream(journalPath))) {
-      JournalHeader header = readHeader(in);
-      List<JournalPageRecord> records = new ArrayList<JournalPageRecord>();
-      while (true) {
-        try {
-          int pageNumber = in.readInt();
-          int payloadLength = in.readInt();
-          if (pageNumber <= 0) throw new IllegalStateException("Invalid page number: " + pageNumber);
-          if (payloadLength != header.getPageSize()) throw new IllegalStateException("Invalid payload length: " + payloadLength);
+    ByteBuffer input = ByteBuffer.wrap(Files.readAllBytes(journalPath));
+    JournalHeader header = decodeHeader(input);
 
-          byte[] payload = new byte[payloadLength];
-          int read = in.read(payload);
-          if (read != payloadLength) throw new IllegalStateException("Truncated page payload");
-          records.add(new JournalPageRecord(pageNumber, payload));
-        } catch (EOFException eof) {
-          break;
-        }
+    List<JournalPageRecord> records = new ArrayList<JournalPageRecord>();
+    while (input.hasRemaining()) {
+      if (input.remaining() < 8) {
+        throw new IllegalStateException("Truncated page payload");
       }
-      return new ParsedJournal(header, records);
+
+      int pageNumber = input.getInt();
+      int payloadLength = input.getInt();
+      if (pageNumber <= 0) throw new IllegalStateException("Invalid page number: " + pageNumber);
+      if (payloadLength != header.getPageSize()) throw new IllegalStateException("Invalid payload length: " + payloadLength);
+      if (input.remaining() < payloadLength) throw new IllegalStateException("Truncated page payload");
+
+      byte[] payload = new byte[payloadLength];
+      input.get(payload);
+      records.add(new JournalPageRecord(pageNumber, payload));
     }
+    return new ParsedJournal(header, records);
   }
 
-  private void writeHeader(DataOutputStream out, JournalHeader header) throws IOException {
-    out.write(MAGIC);
-    out.writeInt(header.getVersion());
-    out.writeInt(header.getPageSize());
-    out.writeInt(header.getReservedFlags());
-    out.writeInt(header.getCommitMarker().code());
+  private ByteBuffer encodeHeader(JournalHeader header) {
+    ByteBuffer out = ByteBuffer.allocate(MAGIC.length + 16);
+    out.put(MAGIC);
+    out.putInt(header.getVersion());
+    out.putInt(header.getPageSize());
+    out.putInt(header.getReservedFlags());
+    out.putInt(header.getCommitMarker().code());
+    return out;
   }
 
-  private JournalHeader readHeader(DataInputStream in) throws IOException {
+  private JournalHeader decodeHeader(ByteBuffer input) {
+    if (input.remaining() < MAGIC.length + 16) throw new IllegalStateException("Invalid journal magic");
+
     byte[] magic = new byte[MAGIC.length];
-    int readMagic = in.read(magic);
-    if (readMagic != MAGIC.length || !Arrays.equals(magic, MAGIC)) {
+    input.get(magic);
+    if (!Arrays.equals(magic, MAGIC)) {
       throw new IllegalStateException("Invalid journal magic");
     }
 
-    int version = in.readInt();
+    int version = input.getInt();
     if (version != VERSION) throw new IllegalStateException("Invalid journal version: " + version);
 
-    int pageSize = in.readInt();
+    int pageSize = input.getInt();
     validatePageSize(pageSize);
 
-    int reservedFlags = in.readInt();
-    int markerCode = in.readInt();
+    int reservedFlags = input.getInt();
+    int markerCode = input.getInt();
     CommitMarker marker = CommitMarker.fromCode(markerCode);
     return new JournalHeader(version, pageSize, reservedFlags, marker);
   }
