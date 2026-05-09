@@ -35,6 +35,17 @@ class RollbackJournalFileTest {
   }
 
   @Test
+  void marksJournalCommitted() throws Exception {
+    Path file = Files.createTempFile("sqlite2j-journal", ".bin");
+    journal.create(file, 8);
+    journal.markCommitted(file);
+
+    ParsedJournal parsed = journal.parse(file);
+    assertEquals(CommitMarker.COMMITTED, parsed.getHeader().getCommitMarker());
+  }
+
+
+  @Test
   void rejectsInvalidMagic() throws Exception {
     Path file = Files.createTempFile("sqlite2j-journal", ".bin");
     Files.write(file, new byte[] {0,1,2,3,4,5,6,7});

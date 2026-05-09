@@ -40,6 +40,19 @@ public final class RollbackJournalFile {
     Files.write(journalPath, record.array(), options);
   }
 
+
+  public void markCommitted(Path journalPath) throws IOException {
+    byte[] bytes = Files.readAllBytes(journalPath);
+    ByteBuffer buffer = ByteBuffer.wrap(bytes);
+    JournalHeader header = decodeHeader(buffer);
+
+    ByteBuffer committedHeader = encodeHeader(
+        new JournalHeader(header.getVersion(), header.getPageSize(), header.getReservedFlags(), CommitMarker.COMMITTED));
+    byte[] committed = committedHeader.array();
+    System.arraycopy(committed, 0, bytes, 0, committed.length);
+    Files.write(journalPath, bytes);
+  }
+
   public ParsedJournal parse(Path journalPath) throws IOException {
     ByteBuffer input = ByteBuffer.wrap(Files.readAllBytes(journalPath));
     JournalHeader header = decodeHeader(input);

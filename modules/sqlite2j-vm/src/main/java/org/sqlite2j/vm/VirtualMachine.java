@@ -113,14 +113,36 @@ public final class VirtualMachine {
 
     transactionState = TransactionState.COMMITTING;
     try {
+      flushDatabaseDurability();
+      finalizeCommitJournal();
       transactionState = TransactionState.IDLE;
       journaledPages.clear();
-    } catch (RuntimeException ex) {
+    } catch (IOException ex) {
       transactionState = TransactionState.ROLLING_BACK;
-      transactionState = TransactionState.IDLE;
-      journaledPages.clear();
-      throw ex;
+      throw new IllegalStateException("Commit finalization failed; recovery required", ex);
     }
+  }
+
+
+  private void flushDatabaseDurability() throws IOException {
+    Path databasePath = database.catalogPath();
+    if (!Files.exists(databasePath)) return;
+
+    FileChannel channel = FileChannel.open(databasePath, StandardOpenOption.WRITE);
+    try {
+      channel.force(true);
+    } finally {
+      channel.close();
+    }
+  }
+
+  private void finalizeCommitJournal() throws IOException {
+    Path journalPath = rollbackJournalFile.derivePath(database.catalogPath());
+    if (!Files.exists(journalPath)) return;
+
+    rollbackJournalFile.markCommitted(journalPath);
+    forceJournalToDisk(journalPath);
+    Files.delete(journalPath);
   }
 
   private void handleRollbackTxn() {
