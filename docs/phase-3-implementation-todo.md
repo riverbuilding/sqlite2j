@@ -23,20 +23,29 @@
 
 ---
 
-## 1) Transaction SQL surface (`BEGIN` / `COMMIT` / `ROLLBACK`)
+## 1) Transaction SQL surface (`BEGIN` / `COMMIT` / `ROLLBACK`) (decided)
 
-- [ ] Confirm parser recognizes:
-  - [ ] `BEGIN`
-  - [ ] `BEGIN TRANSACTION`
-  - [ ] `COMMIT`
-  - [ ] `ROLLBACK`
-- [ ] Ensure unsupported `BEGIN` modifiers (`DEFERRED`/`IMMEDIATE`/`EXCLUSIVE`) are handled per Phase 3 decision (clear unsupported/invalid behavior).
-- [ ] Add/update planner nodes (or equivalent dispatch path) for transaction control statements only.
-- [ ] Wire executor entry points for begin/commit/rollback actions with no storage changes yet in this step.
+- [x] **Accepted statements in Phase 3**
+  - `BEGIN`
+  - `BEGIN TRANSACTION` (same behavior as `BEGIN`)
+  - `COMMIT`
+  - `ROLLBACK`
+
+- [x] **Parser behavior contract**
+  - Transaction control statements must be recognized deterministically and mapped to dedicated transaction-control statement types.
+  - Parsing must preserve statement kind so executor dispatch can enforce state-machine rules reliably.
+
+- [x] **`BEGIN` modifier behavior in Phase 3**
+  - `BEGIN DEFERRED`, `BEGIN IMMEDIATE`, and `BEGIN EXCLUSIVE` are out of scope unless already required by current parser compatibility.
+  - If not already supported, return clear unsupported/invalid behavior rather than silently aliasing to a different mode.
+
+- [x] **Planner/executor touchpoint constraints**
+  - Planner (or equivalent dispatch layer) should route `BEGIN`/`COMMIT`/`ROLLBACK` directly to transaction-control actions.
+  - Do not introduce speculative storage abstractions at this step; only wire the minimum control-path behavior required for transaction commands.
 
 **Checkpoint gate**
-- [ ] Transaction statements are recognized and routed deterministically.
-- [ ] Invalid forms produce deterministic errors.
+- [x] Transaction statements are recognized and routed deterministically.
+- [x] Unsupported/invalid transaction forms produce deterministic errors.
 
 ---
 
