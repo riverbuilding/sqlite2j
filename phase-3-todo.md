@@ -314,11 +314,59 @@
 
 ## 6) Parser/planner/executor touchpoints (design tasks only)
 
-- [ ] Map SQL `BEGIN`/`COMMIT`/`ROLLBACK` to execution actions
-- [ ] Decide whether `BEGIN` variants (`DEFERRED/IMMEDIATE/EXCLUSIVE`) are:
-  - Unsupported for now (with clear error), or
-  - Accepted but treated uniformly in this phase
-- [ ] Define user-visible error messages and codes for transaction misuse
+### 6.1 Parser touchpoints (decided)
+
+- [x] Parser must recognize:
+  - `BEGIN`
+  - `BEGIN TRANSACTION`
+  - `COMMIT`
+  - `ROLLBACK`
+
+- [x] `BEGIN` modifier handling in Phase 3:
+  - `DEFERRED`, `IMMEDIATE`, `EXCLUSIVE` are not functionally differentiated in Phase 3.
+  - If currently accepted by parser grammar, normalize to base `BEGIN` semantic behavior.
+  - If not currently accepted, return explicit unsupported/invalid syntax behavior.
+
+- [x] Parser must emit deterministic statement kinds for transaction commands (no heuristic inference downstream).
+
+### 6.2 Planner touchpoints (decided)
+
+- [x] Planner maps transaction statement kinds to dedicated transaction plan nodes/actions, not generic data-mutation nodes.
+- [x] Transaction plan actions are side-effectful control operations with no row-result payload requirement.
+- [x] Planner must preserve statement order exactly as submitted; no reordering across transaction control boundaries.
+
+### 6.3 Executor touchpoints (decided)
+
+- [x] Executor dispatch rules:
+  - `BEGIN` -> call transaction manager begin path (`IDLE -> IN_TXN`)
+  - `COMMIT` -> call commit path (`IN_TXN -> COMMITTING -> IDLE`)
+  - `ROLLBACK` -> call rollback path (`IN_TXN -> ROLLING_BACK -> IDLE`)
+
+- [x] Executor must enforce state-validity checks before invoking transition work and return deterministic transaction-state errors on invalid commands.
+- [x] Executor must not bypass journaling/state-machine contracts for transaction commands.
+
+### 6.4 Error surface and messaging contract (decided)
+
+- [x] Define stable user-visible error categories for Phase 3:
+  - No active transaction
+  - Transaction already active
+  - Transaction busy/illegal transition state
+  - Recovery/integrity-required failure
+
+- [x] Error message text can be refined during implementation, but category-to-condition mapping must remain deterministic.
+- [x] Invalid transaction-control statements must not partially mutate transaction state.
+
+### 6.5 Observability and diagnostics (decided, minimal)
+
+- [x] Add minimal internal diagnostics hooks/log points at transaction boundaries (`BEGIN`, `COMMIT`, `ROLLBACK`, recovery-trigger).
+- [x] No extensive telemetry framework added in Phase 3; keep instrumentation minimal and local to current production behavior.
+
+### 6.6 Compatibility constraints (decided)
+
+- [x] Maintain JDK 15 compatibility in parser/planner/executor changes.
+- [x] Do not introduce speculative abstractions beyond what is required to execute Phase 3 behavior.
+
+---
 
 ## 7) Test plan (must pass on JDK 15 + `mvn test`)
 
