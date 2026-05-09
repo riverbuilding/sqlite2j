@@ -12,9 +12,15 @@ import org.sqlite2j.sql.ast.ColumnDef;
 
 public final class VirtualMachine {
   private final VmDatabase database;
+  private TransactionState transactionState;
 
   public VirtualMachine(VmDatabase database) {
     this.database = database;
+    this.transactionState = TransactionState.IDLE;
+  }
+
+  TransactionState transactionState() {
+    return transactionState;
   }
 
   public VmResult execute(Program program) {
@@ -56,9 +62,12 @@ public final class VirtualMachine {
         applyUpdateRows(openWriteTable, currentWhere, instruction.getP1(), instruction.getP2());
       } else if (opcode == Opcode.DELETE_ROWS) {
         applyDeleteRows(openWriteTable, currentWhere);
-      } else if (opcode == Opcode.BEGIN_TXN || opcode == Opcode.COMMIT_TXN || opcode == Opcode.ROLLBACK_TXN) {
-        // Phase 3 step 1 only wires SQL transaction control flow through parser/planner/executor.
-        // Transaction state and rollback-journal semantics are implemented in later steps.
+      } else if (opcode == Opcode.BEGIN_TXN) {
+        handleBeginTxn();
+      } else if (opcode == Opcode.COMMIT_TXN) {
+        handleCommitTxn();
+      } else if (opcode == Opcode.ROLLBACK_TXN) {
+        handleRollbackTxn();
       } else if (opcode == Opcode.HALT) {
         break;
       } else {
@@ -66,6 +75,47 @@ public final class VirtualMachine {
       }
     }
     return result;
+  }
+
+
+  private void handleBeginTxn() {
+    if (transactionState == TransactionState.IN_TXN) {
+      throw new IllegalStateException("Transaction already active");
+    }
+    if (transactionState == TransactionState.COMMITTING || transactionState == TransactionState.ROLLING_BACK) {
+      throw new IllegalStateException("Transaction control is busy: " + transactionState);
+    }
+    transactionState = TransactionState.IN_TXN;
+  }
+
+  private void handleCommitTxn() {
+    if (transactionState == TransactionState.IDLE) {
+      throw new IllegalStateException("No active transaction");
+    }
+    if (transactionState == TransactionState.COMMITTING || transactionState == TransactionState.ROLLING_BACK) {
+      throw new IllegalStateException("Transaction control is busy: " + transactionState);
+    }
+
+    transactionState = TransactionState.COMMITTING;
+    try {
+      transactionState = TransactionState.IDLE;
+    } catch (RuntimeException ex) {
+      transactionState = TransactionState.ROLLING_BACK;
+      transactionState = TransactionState.IDLE;
+      throw ex;
+    }
+  }
+
+  private void handleRollbackTxn() {
+    if (transactionState == TransactionState.IDLE) {
+      throw new IllegalStateException("No active transaction");
+    }
+    if (transactionState == TransactionState.COMMITTING || transactionState == TransactionState.ROLLING_BACK) {
+      throw new IllegalStateException("Transaction control is busy: " + transactionState);
+    }
+
+    transactionState = TransactionState.ROLLING_BACK;
+    transactionState = TransactionState.IDLE;
   }
 
   private void applyUpdateRows(String tableName, String where, String columnName, String encodedLiteral) {

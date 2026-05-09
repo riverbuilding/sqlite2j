@@ -156,6 +156,45 @@ class VirtualMachineTest {
   }
 
   @Test
+  void transactionStateTransitionsAreDeterministic() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+    vm.execute(compiler.compile("BEGIN;"));
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+    vm.execute(compiler.compile("COMMIT;"));
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+
+    vm.execute(compiler.compile("BEGIN;"));
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+    vm.execute(compiler.compile("ROLLBACK;"));
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+  }
+
+  @Test
+  void transactionStateMisuseDoesNotMutateState() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    RuntimeException commitNoTxn = assertThrows(RuntimeException.class, () -> vm.execute(compiler.compile("COMMIT;")));
+    assertEquals("No active transaction", commitNoTxn.getMessage());
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+
+    RuntimeException rollbackNoTxn = assertThrows(RuntimeException.class, () -> vm.execute(compiler.compile("ROLLBACK;")));
+    assertEquals("No active transaction", rollbackNoTxn.getMessage());
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+
+    vm.execute(compiler.compile("BEGIN;"));
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+
+    RuntimeException nestedBegin = assertThrows(RuntimeException.class, () -> vm.execute(compiler.compile("BEGIN;")));
+    assertEquals("Transaction already active", nestedBegin.getMessage());
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+  }
+
+
+  @Test
   void updateWhereNoMatchesLeavesRowsUnchanged() throws Exception {
     VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);
