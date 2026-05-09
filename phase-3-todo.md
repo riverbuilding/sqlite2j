@@ -191,18 +191,63 @@
 
 ## 4) Write path ordering rules (correctness before optimization)
 
-- [ ] Specify write-ahead ordering for rollback journal:
-  1. Capture original page into journal (first time page touched in txn)
-  2. Flush/sync journal to durable media
-  3. Apply page change to DB
-- [ ] Define commit ordering:
-  - Ensure DB changes durable as required
-  - Mark commit completion via journal finalization strategy
-- [ ] Define rollback ordering:
-  - Restore pages from journal in deterministic order
-  - Flush restored state as needed
-  - Remove/invalidate journal after successful rollback
-- [ ] Explicitly avoid performance optimizations for now (batching, group commit, etc.)
+### 4.1 Fundamental ordering contract (decided)
+
+- [x] Rollback-journal mode in Phase 3 follows strict **journal-before-database** ordering.
+- [x] No database page overwrite is allowed until the corresponding rollback preimage is durably recorded.
+- [x] Correctness takes priority over throughput/latency in all ordering decisions.
+
+### 4.2 Per-page mutation sequence (decided)
+
+- [x] For each page mutation within an explicit transaction:
+  1. Check whether this page already has a journaled preimage in current transaction.
+  2. If not journaled yet, append the original page preimage record to journal.
+  3. Sync journal so newly required rollback bytes are durable.
+  4. Apply in-memory and/or on-disk page mutation according to existing engine architecture.
+
+- [x] If page preimage was already journaled in the same transaction:
+  - Skip preimage append.
+  - Continue with page mutation (subject to existing durability boundaries).
+
+### 4.3 Multi-page statement behavior (decided)
+
+- [x] Statements mutating multiple pages must obey the same per-page rule for each page touched.
+- [x] Partial progress inside a statement is acceptable during execution as long as rollback journal guarantees full restoration capability.
+- [x] On statement-level failure inside `IN_TXN`, transaction remains active unless failure is classified as unrecoverable for integrity.
+
+### 4.4 Commit ordering (decided)
+
+- [x] Commit path transitions engine to `COMMITTING` state before final durability actions.
+- [x] Commit finalization order:
+  1. Ensure all transaction DB changes required by the Phase 3 durability definition are flushed/synced.
+  2. Update journal commit marker to `COMMITTED`.
+  3. Sync journal metadata/content as needed so marker transition is durable.
+  4. Remove journal file (preferred cleanup) or otherwise invalidate it unambiguously.
+  5. Transition to `IDLE` only after the above steps reach a non-ambiguous outcome.
+
+- [x] If commit path fails before non-ambiguous finalization:
+  - Prefer rollback/recovery-safe handling over reporting success.
+  - Never report commit success while requiring rollback for correctness.
+
+### 4.5 Rollback ordering (decided)
+
+- [x] Rollback path transitions engine to `ROLLING_BACK` state.
+- [x] Rollback restore order:
+  1. Read journal records and restore original page preimages.
+  2. Flush/sync restored DB state as required for consistency.
+  3. Remove/invalidate journal file.
+  4. Transition back to `IDLE`.
+
+- [x] Rollback must be safe to retry after interruption (idempotent recovery orientation).
+
+### 4.6 Explicit non-optimizations for Phase 3 (decided)
+
+- [x] No group commit or batched fsync optimization.
+- [x] No deferred preimage capture.
+- [x] No speculative coalescing of journal records beyond first-preimage rule.
+- [x] No fast-path that weakens journal-before-overwrite correctness.
+
+---
 
 ## 5) Crash recovery on reopen
 
