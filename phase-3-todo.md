@@ -51,19 +51,78 @@
 
 ## 2) Journal file format and lifecycle design
 
-- [ ] Specify rollback journal file naming/location strategy (e.g., sidecar file next to DB)
-- [ ] Define minimal journal format for correctness-first implementation:
-  - Header/magic + version
-  - Transaction state marker(s)
-  - Original page images (page number + bytes)
-  - Optional checksum/length fields (if needed for corruption detection in this phase)
-- [ ] Define journal lifecycle states:
-  - Created on first write in transaction
-  - Populated with original pages before any page overwrite
-  - Synced before mutating DB pages (ordering guarantee)
-  - Deleted/truncated/invalidated at successful commit
-- [ ] Define behavior if journal exists at open/startup:
-  - Recovery required vs stale/clean journal detection
+### 2.1 Journal filename and placement (decided)
+
+- [x] Journal path is a sidecar next to the main database file.
+- [x] Base naming rule: `<db-file-path>-journal`.
+- [x] No alternate temp directory behavior in Phase 3.
+- [x] Journal is treated as owned by exactly one database file path.
+
+### 2.2 Minimal rollback journal format (decided)
+
+- [x] File layout is append-only during an active transaction and uses fixed-size header + repeated page records.
+
+- [x] **Header fields** (written at journal creation):
+  - Magic bytes (constant identifier for rollback journal)
+  - Format version (Phase 3 fixed integer)
+  - Database page size (bytes)
+  - Reserved header flags (set to 0 in Phase 3)
+
+- [x] **Transaction status marker**:
+  - Header includes a commit marker field with two states:
+    - `INCOMPLETE` (default after creation)
+    - `COMMITTED` (set only at commit finalization)
+
+- [x] **Page record format**:
+  - Page number (`int`/fixed-width numeric field)
+  - Page payload length (must equal database page size in Phase 3)
+  - Raw page bytes (original preimage)
+
+- [x] **Duplication rule**:
+  - Only the first preimage of a page in a transaction is journaled.
+  - Rewrites to the same page during the same transaction do not append duplicate preimages.
+
+- [x] **Integrity checks (minimal but required)**:
+  - Reject journal if magic/version/page-size fields are invalid.
+  - Reject records with invalid page number or truncated payload.
+  - No per-record checksum in Phase 3 unless implementation reveals a concrete correctness gap.
+
+### 2.3 Journal lifecycle and state transitions (decided)
+
+- [x] **Creation**:
+  - Journal file is created lazily on first page mutation inside an explicit transaction.
+  - Header is written immediately with `INCOMPLETE` status.
+
+- [x] **Population**:
+  - Before mutating any DB page for the first time in a transaction, write that page's original preimage to the journal.
+
+- [x] **Durability ordering**:
+  - Journal content needed for rollback is synced before corresponding DB page overwrite.
+
+- [x] **Commit finalization**:
+  - After DB-side commit durability steps, set journal status to `COMMITTED`.
+  - Then remove the journal file (preferred) as the final cleanup step.
+  - If deletion fails, startup logic must still treat a `COMMITTED` journal as non-recovery input.
+
+- [x] **Rollback finalization**:
+  - Restore pages from journal preimages.
+  - Sync restored DB state as required for consistency.
+  - Remove journal file after successful rollback completion.
+
+### 2.4 Journal presence at startup/reopen (decided)
+
+- [x] If no journal exists, continue normal startup.
+
+- [x] If journal exists:
+  - Parse and validate header/records conservatively.
+  - If status is `INCOMPLETE` and structure is valid enough to replay, perform rollback recovery.
+  - If status is `COMMITTED`, treat as stale and remove/ignore safely.
+
+- [x] Corrupt/ambiguous journal behavior:
+  - Never treat corruption as successful commit.
+  - Prefer integrity-preserving failure mode if safe recovery cannot be proven.
+
+---
 
 ## 3) Transaction state machine (engine-level behavior)
 
