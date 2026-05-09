@@ -251,15 +251,66 @@
 
 ## 5) Crash recovery on reopen
 
-- [ ] Define startup recovery algorithm:
-  - Detect hot/incomplete journal
-  - Validate journal sanity (header/state/length)
-  - Replay rollback (restore original pages)
-  - Finalize cleanup and transition to clean startup
-- [ ] Define behavior for partial/corrupt journal:
-  - Conservative fallback that preserves integrity (fail-safe)
-- [ ] Define idempotency requirements:
-  - Re-running recovery after interruption should remain safe
+### 5.1 Recovery trigger detection (decided)
+
+- [x] On database open, check for existence of sidecar journal (`<db-file-path>-journal`).
+- [x] If no journal exists, startup proceeds normally with no recovery phase.
+- [x] If journal exists, startup enters recovery decision flow before accepting mutating operations.
+
+### 5.2 Journal validation gates (decided)
+
+- [x] Validate minimally required header fields before any replay:
+  - Magic bytes
+  - Format version
+  - Page size compatibility with target database
+  - Commit marker field presence/state
+
+- [x] Validate page records conservatively:
+  - Page number range sanity
+  - Payload length correctness
+  - No truncated record tails
+
+- [x] If validation proves journal is stale-safe (`COMMITTED` + structurally sane), treat as cleanup candidate, not replay input.
+
+### 5.3 Recovery decision matrix (decided)
+
+- [x] `COMMITTED` journal:
+  - Do not replay rollback.
+  - Remove/ignore journal safely and continue startup.
+
+- [x] `INCOMPLETE` journal with valid replayable records:
+  - Run rollback replay before normal startup.
+
+- [x] Corrupt/ambiguous journal:
+  - Never infer success of interrupted commit.
+  - Prefer integrity-preserving failure mode when correctness cannot be proven.
+
+### 5.4 Rollback replay algorithm on reopen (decided)
+
+- [x] Recovery replay steps:
+  1. Open journal and parse validated records.
+  2. Restore each recorded original page preimage to database.
+  3. Flush/sync restored DB state as required by Phase 3 consistency contract.
+  4. Remove/invalidate journal.
+  5. Mark recovery complete and continue normal startup.
+
+- [x] Replay order may be deterministic record order; correctness requirement is exact restoration of pre-transaction state.
+
+### 5.5 Idempotency and interruption safety (decided)
+
+- [x] Recovery process must be safe to run again after interruption (power loss/crash during recovery).
+- [x] Repeated reopen attempts either:
+  - Progress toward a clean `IDLE` startup state, or
+  - Stop with explicit integrity-protecting failure.
+- [x] Recovery must not create a state that appears committed if commit was not durably finalized.
+
+### 5.6 Startup availability vs integrity policy (decided)
+
+- [x] Integrity dominates availability for ambiguous states.
+- [x] If neither safe replay nor safe staleness classification is possible, startup must fail closed with an explicit recovery/integrity error.
+- [x] No best-effort "continue anyway" mode in Phase 3.
+
+---
 
 ## 6) Parser/planner/executor touchpoints (design tasks only)
 
