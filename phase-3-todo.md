@@ -370,22 +370,65 @@
 
 ## 7) Test plan (must pass on JDK 15 + `mvn test`)
 
-- [ ] Unit tests: transaction state machine edge cases
-- [ ] Integration tests:
-  - `BEGIN` + writes + `COMMIT` persists changes
-  - `BEGIN` + writes + `ROLLBACK` discards changes
-  - Multiple page updates in single txn
-  - Same page updated multiple times (journal only needs original preimage)
-- [ ] Crash simulation tests (deterministic):
-  - Crash after journal write but before DB write
-  - Crash after some DB writes but before commit finalization
-  - Reopen triggers recovery and restores consistent pre-txn state
-- [ ] Reopen tests:
-  - Clean reopen (no journal)
-  - Hot journal recovery path
-- [ ] Negative tests:
-  - `COMMIT`/`ROLLBACK` outside txn
-  - `BEGIN` inside active txn
+### 7.1 Test execution constraints (decided)
+
+- [x] All Phase 3 implementation validation must run on JDK 15.
+- [x] Baseline validation command is repository-root `mvn test`.
+- [x] New tests should be deterministic and avoid timing-sensitive flakiness.
+
+### 7.2 Unit tests — transaction state machine (planned)
+
+- [ ] State transition coverage:
+  - `IDLE -> IN_TXN` via `BEGIN`
+  - `IN_TXN -> COMMITTING -> IDLE` via `COMMIT`
+  - `IN_TXN -> ROLLING_BACK -> IDLE` via `ROLLBACK`
+
+- [ ] Invalid command coverage:
+  - `COMMIT` in `IDLE` returns "no active transaction" category
+  - `ROLLBACK` in `IDLE` returns "no active transaction" category
+  - `BEGIN` in `IN_TXN` returns "transaction already active" category
+
+- [ ] Transition-state guard coverage:
+  - Reject re-entrant transaction commands during `COMMITTING`/`ROLLING_BACK`
+  - Ensure invalid command attempts do not mutate state
+
+### 7.3 Integration tests — transaction semantics (planned)
+
+- [ ] `BEGIN` + writes + `COMMIT` persists changes after reopen.
+- [ ] `BEGIN` + writes + `ROLLBACK` discards changes.
+- [ ] Multiple page updates within one transaction commit atomically.
+- [ ] Same page updated multiple times journals only first preimage while preserving final logical result.
+- [ ] Mixed read/write behavior within `IN_TXN` reflects transaction-local current view.
+
+### 7.4 Crash simulation tests (planned)
+
+- [ ] Crash after journal preimage append but before DB page overwrite.
+- [ ] Crash after some DB overwrites but before commit marker finalization.
+- [ ] Crash after commit marker set but before journal cleanup.
+- [ ] Reopen after each simulated crash executes expected recovery path and restores consistent state.
+
+### 7.5 Reopen/recovery tests (planned)
+
+- [ ] Clean reopen with no journal performs no recovery.
+- [ ] Reopen with `INCOMPLETE` replayable journal restores pre-transaction state.
+- [ ] Reopen with `COMMITTED` journal treats file as stale cleanup candidate.
+- [ ] Reopen with malformed/ambiguous journal fails closed with integrity-preserving error.
+- [ ] Recovery idempotency: repeated reopen attempts after interrupted recovery remain safe.
+
+### 7.6 Negative and error-contract tests (planned)
+
+- [ ] Validate deterministic mapping from misuse to error categories.
+- [ ] Validate no partial state mutation on invalid transaction-control commands.
+- [ ] Validate commit is never reported successful when rollback/recovery is still required for correctness.
+
+### 7.7 Minimal implementation-phase acceptance gates (decided)
+
+- [x] Phase 3 is not considered complete until:
+  - Unit, integration, crash-simulation, reopen, and negative tests are implemented for committed behavior.
+  - `mvn test` passes on JDK 15.
+  - No regression in existing phase compatibility tests.
+
+---
 
 ## 8) Non-goals for Phase 3 (to prevent scope creep)
 
