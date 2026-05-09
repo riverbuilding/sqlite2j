@@ -98,6 +98,34 @@ class Phase1CodeGeneratorTest {
   }
 
   @Test
+  void beginGoldenProgram() {
+    Program program = compiler.compile("BEGIN;");
+    assertEquals(
+        "000 BEGIN_TXN - -\n" +
+        "001 HALT - -",
+        program.toDeterministicString());
+  }
+
+  @Test
+  void commitGoldenProgram() {
+    Program program = compiler.compile("COMMIT;");
+    assertEquals(
+        "000 COMMIT_TXN - -\n" +
+        "001 HALT - -",
+        program.toDeterministicString());
+  }
+
+  @Test
+  void rollbackGoldenProgram() {
+    Program program = compiler.compile("ROLLBACK;");
+    assertEquals(
+        "000 ROLLBACK_TXN - -\n" +
+        "001 HALT - -",
+        program.toDeterministicString());
+  }
+
+
+  @Test
   void scanFirstHeuristicOpcodeOrderIsStable() {
     Program select = compiler.compile("SELECT * FROM users WHERE id = 1 ORDER BY name DESC;");
     Program update = compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;");

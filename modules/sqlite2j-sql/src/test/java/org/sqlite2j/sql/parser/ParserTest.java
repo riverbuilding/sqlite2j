@@ -11,10 +11,13 @@ import org.sqlite2j.sql.ast.CreateTableStatement;
 import org.sqlite2j.sql.ast.Expression;
 import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.SelectAllStatement;
+import org.sqlite2j.sql.ast.BeginTransactionStatement;
+import org.sqlite2j.sql.ast.CommitStatement;
 import org.sqlite2j.sql.ast.ComparisonExpression;
 import org.sqlite2j.sql.ast.ComparisonOperator;
 import org.sqlite2j.sql.ast.DeleteStatement;
 import org.sqlite2j.sql.ast.OrderByClause;
+import org.sqlite2j.sql.ast.RollbackStatement;
 import org.sqlite2j.sql.ast.UpdateStatement;
 
 class ParserTest {
@@ -166,6 +169,37 @@ class ParserTest {
     SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("UPDATE users SET name = ;"));
     assertEquals(SqlErrorCode.UNEXPECTED_TOKEN, ex.getCode());
   }
+
+  @Test
+  void parsesBegin() {
+    var stmt = parser.parse("BEGIN;");
+    assertInstanceOf(BeginTransactionStatement.class, stmt);
+  }
+
+  @Test
+  void parsesBeginTransaction() {
+    var stmt = parser.parse("BEGIN TRANSACTION;");
+    assertInstanceOf(BeginTransactionStatement.class, stmt);
+  }
+
+  @Test
+  void parsesCommit() {
+    var stmt = parser.parse("COMMIT;");
+    assertInstanceOf(CommitStatement.class, stmt);
+  }
+
+  @Test
+  void parsesRollback() {
+    var stmt = parser.parse("ROLLBACK;");
+    assertInstanceOf(RollbackStatement.class, stmt);
+  }
+
+  @Test
+  void rejectsUnsupportedBeginModifier() {
+    SqlParseException ex = assertThrows(SqlParseException.class, () -> parser.parse("BEGIN IMMEDIATE;"));
+    assertEquals(SqlErrorCode.UNSUPPORTED_STATEMENT, ex.getCode());
+  }
+
 
   @Test
   void rejectsDeleteWithTrailingGarbage() {

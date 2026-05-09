@@ -10,5 +10,8 @@ public enum Opcode {
   UPDATE_ROWS,
   DELETE_ROWS,
   RESULT_ROW,
+  BEGIN_TXN,
+  COMMIT_TXN,
+  ROLLBACK_TXN,
   HALT
 }

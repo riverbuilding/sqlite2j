@@ -70,6 +70,16 @@ class TokenizerTest {
   }
 
   @Test
+  void tokenizesTransactionKeywords() {
+    List<Token> tokens = tokenizer.tokenize("BEGIN TRANSACTION; COMMIT; ROLLBACK;");
+    assertEquals(TokenType.BEGIN, tokens.get(0).getType());
+    assertEquals(TokenType.TRANSACTION, tokens.get(1).getType());
+    assertEquals(TokenType.COMMIT, tokens.get(3).getType());
+    assertEquals(TokenType.ROLLBACK, tokens.get(5).getType());
+  }
+
+
+  @Test
   void tokenizesKeywordsWithMixedCasing() {
     List<Token> tokens = tokenizer.tokenize(
         "sElEcT * fRoM t wHeRe id >= 1 oRdEr bY name dEsC; uPdAtE t sEt name = 'x'; dElEtE fRoM t;");

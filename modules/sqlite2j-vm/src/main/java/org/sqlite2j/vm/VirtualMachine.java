@@ -56,6 +56,9 @@ public final class VirtualMachine {
         applyUpdateRows(openWriteTable, currentWhere, instruction.getP1(), instruction.getP2());
       } else if (opcode == Opcode.DELETE_ROWS) {
         applyDeleteRows(openWriteTable, currentWhere);
+      } else if (opcode == Opcode.BEGIN_TXN || opcode == Opcode.COMMIT_TXN || opcode == Opcode.ROLLBACK_TXN) {
+        // Phase 3 step 1 only wires SQL transaction control flow through parser/planner/executor.
+        // Transaction state and rollback-journal semantics are implemented in later steps.
       } else if (opcode == Opcode.HALT) {
         break;
       } else {
