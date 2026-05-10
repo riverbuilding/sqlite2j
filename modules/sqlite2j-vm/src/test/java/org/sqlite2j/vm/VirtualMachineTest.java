@@ -221,6 +221,52 @@ class VirtualMachineTest {
 
 
   @Test
+  void reopenRecoversIncompleteJournalToPreBeginState() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+
+    VmDatabase reopened = new VmDatabase(dbPath);
+    VirtualMachine vm2 = new VirtualMachine(reopened);
+    VmResult recovered = vm2.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", recovered.getRows().get(0).getValues().get(1).getValue());
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    assertEquals(false, Files.exists(journalPath));
+  }
+
+  @Test
+  void reopenCleansCommittedJournalAsStale() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    byte[] snapshot = Files.readAllBytes(dbPath);
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    org.sqlite2j.journal.RollbackJournalFile journal = new org.sqlite2j.journal.RollbackJournalFile();
+    journal.create(journalPath, Math.max(1, snapshot.length));
+    byte[] page = new byte[Math.max(1, snapshot.length)];
+    System.arraycopy(snapshot, 0, page, 0, Math.min(snapshot.length, page.length));
+    journal.appendPageRecord(journalPath, 1, page, page.length);
+    journal.markCommitted(journalPath);
+
+    VmDatabase reopened = new VmDatabase(dbPath);
+    VirtualMachine vm2 = new VirtualMachine(reopened);
+    VmResult result = vm2.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+    assertEquals(false, Files.exists(journalPath));
+  }
+
+
+  @Test
   void rollbackRestoresPreBeginStateAndRemovesJournal() throws Exception {
     java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
     VmDatabase db = new VmDatabase(dbPath);

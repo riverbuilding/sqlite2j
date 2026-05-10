@@ -1,6 +1,7 @@
 package org.sqlite2j.vm;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +11,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.sqlite2j.journal.CommitMarker;
+import org.sqlite2j.journal.JournalPageRecord;
+import org.sqlite2j.journal.ParsedJournal;
+import org.sqlite2j.journal.RollbackJournalFile;
 import org.sqlite2j.core.schema.SchemaRegistry;
 import org.sqlite2j.core.schema.TableSchema;
 import org.sqlite2j.sql.ast.ColumnDef;
@@ -20,10 +25,12 @@ public final class VmDatabase {
   private final SchemaRegistry schemaRegistry;
   private final Map<String, List<VmRow>> tableRows = new LinkedHashMap<String, List<VmRow>>();
   private final Path catalogPath;
+  private final RollbackJournalFile rollbackJournalFile = new RollbackJournalFile();
 
   public VmDatabase(Path catalogPath) {
     this.catalogPath = catalogPath;
     this.schemaRegistry = new SchemaRegistry(catalogPath);
+    recoverJournalIfPresent();
     load();
   }
 
@@ -69,6 +76,47 @@ public final class VmDatabase {
     tableRows.clear();
     schemaRegistry.reset();
     load();
+  }
+
+
+  private void recoverJournalIfPresent() {
+    Path journalPath = rollbackJournalFile.derivePath(catalogPath);
+    if (!Files.exists(journalPath)) return;
+
+    final ParsedJournal parsed;
+    try {
+      parsed = rollbackJournalFile.parse(journalPath);
+    } catch (RuntimeException | IOException ex) {
+      throw new IllegalStateException("Unsafe journal state; recovery aborted", ex);
+    }
+
+    try {
+      if (parsed.getHeader().getCommitMarker() == CommitMarker.COMMITTED) {
+        Files.deleteIfExists(journalPath);
+        return;
+      }
+
+      for (JournalPageRecord record : parsed.getRecords()) {
+        if (record.getPageNumber() != 1) {
+          throw new IllegalStateException("Unsupported recovery page number: " + record.getPageNumber());
+        }
+        Files.write(catalogPath, record.getPreimage());
+      }
+      forceCatalogSync();
+      Files.deleteIfExists(journalPath);
+    } catch (IOException ex) {
+      throw new IllegalStateException("Journal recovery failed", ex);
+    }
+  }
+
+  private void forceCatalogSync() throws IOException {
+    if (!Files.exists(catalogPath)) return;
+    FileChannel channel = FileChannel.open(catalogPath, java.nio.file.StandardOpenOption.WRITE);
+    try {
+      channel.force(true);
+    } finally {
+      channel.close();
+    }
   }
 
   private void load() {
