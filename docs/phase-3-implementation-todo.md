@@ -159,29 +159,29 @@
 ## 8) Tests to implement (JDK 15 + `mvn test`)
 
 ### 8.1 Unit tests
-- [ ] State transition validity and invalid-command matrix.
-- [ ] Journal header/record parsing and validation failures.
-- [ ] First-preimage-only tracking logic.
+- [x] State transition validity and invalid-command matrix.
+- [x] Journal header/record parsing and validation failures.
+- [x] First-preimage-only tracking logic.
 
 ### 8.2 Integration tests
-- [ ] `BEGIN` + writes + `COMMIT` persists.
-- [ ] `BEGIN` + writes + `ROLLBACK` discards.
+- [x] `BEGIN` + writes + `COMMIT` persists.
+- [x] `BEGIN` + writes + `ROLLBACK` discards.
 - [ ] Multi-page mutations in one transaction.
-- [ ] Repeated updates to same page journal only first preimage.
+- [x] Repeated updates to same page journal only first preimage.
 
 ### 8.3 Crash/reopen tests
-- [ ] Crash after journal preimage sync, before DB overwrite.
-- [ ] Crash after some DB overwrites, before commit finalization.
-- [ ] Reopen with `INCOMPLETE` journal triggers recovery.
-- [ ] Reopen with `COMMITTED` journal performs stale cleanup.
+- [x] Crash after journal preimage sync, before DB overwrite.
+- [x] Crash after some DB overwrites, before commit finalization.
+- [x] Reopen with `INCOMPLETE` journal triggers recovery.
+- [x] Reopen with `COMMITTED` journal performs stale cleanup.
 
 ### 8.4 Negative/error tests
-- [ ] `COMMIT`/`ROLLBACK` with no active transaction.
-- [ ] `BEGIN` while transaction active.
-- [ ] Command rejection during transitional states.
+- [x] `COMMIT`/`ROLLBACK` with no active transaction.
+- [x] `BEGIN` while transaction active.
+- [x] Command rejection during transitional states.
 
 **Checkpoint gate**
-- [ ] `mvn test` passes with new coverage and no regression.
+- [x] `mvn test` passes with new coverage and no regression.
 
 ---
 
