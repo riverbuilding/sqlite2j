@@ -154,10 +154,33 @@ public final class VirtualMachine {
     }
 
     transactionState = TransactionState.ROLLING_BACK;
-    transactionState = TransactionState.IDLE;
-    journaledPages.clear();
+    try {
+      restoreFromRollbackJournal();
+      transactionState = TransactionState.IDLE;
+      journaledPages.clear();
+    } catch (IOException ex) {
+      throw new IllegalStateException("Rollback failed; recovery required", ex);
+    }
   }
 
+
+
+  private void restoreFromRollbackJournal() throws IOException {
+    Path databasePath = database.catalogPath();
+    Path journalPath = rollbackJournalFile.derivePath(databasePath);
+    if (!Files.exists(journalPath)) return;
+
+    org.sqlite2j.journal.ParsedJournal parsed = rollbackJournalFile.parse(journalPath);
+    for (org.sqlite2j.journal.JournalPageRecord record : parsed.getRecords()) {
+      if (record.getPageNumber() != 1) {
+        throw new IllegalStateException("Unsupported rollback page number: " + record.getPageNumber());
+      }
+      Files.write(databasePath, record.getPreimage());
+    }
+    flushDatabaseDurability();
+    Files.deleteIfExists(journalPath);
+    database.reloadFromDisk();
+  }
 
   private void journalBeforeOverwriteIfNeeded() {
     if (transactionState != TransactionState.IN_TXN) return;

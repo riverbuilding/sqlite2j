@@ -64,6 +64,13 @@ public final class VmDatabase {
     save();
   }
 
+
+  void reloadFromDisk() {
+    tableRows.clear();
+    schemaRegistry.reset();
+    load();
+  }
+
   private void load() {
     try {
       if (!Files.exists(catalogPath) || Files.size(catalogPath) == 0) return;

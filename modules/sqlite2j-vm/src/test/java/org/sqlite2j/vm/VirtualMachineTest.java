@@ -221,6 +221,28 @@ class VirtualMachineTest {
 
 
   @Test
+  void rollbackRestoresPreBeginStateAndRemovesJournal() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+    vm.execute(compiler.compile("ROLLBACK;"));
+
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    assertEquals(false, Files.exists(journalPath));
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+  }
+
+
+  @Test
   void transactionStateTransitionsAreDeterministic() throws Exception {
     VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);
