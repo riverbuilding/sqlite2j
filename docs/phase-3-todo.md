@@ -218,6 +218,10 @@
 ### 4.4 Commit ordering (decided)
 
 - [x] Commit path transitions engine to `COMMITTING` state before final durability actions.
+- [x] **Known implementation deviation to fix in later phase**:
+  - Current implementation uses a hybrid marker-based commit finalization (`COMMITTED` marker + sync + delete).
+  - Target protocol should be unified to a strict SQLite-like rollback-journal commit lifecycle (delete/truncate model with durable cleanup semantics).
+  - Do not treat the current hybrid style as final architecture.
 - [x] Commit finalization order:
   1. Ensure all transaction DB changes required by the Phase 3 durability definition are flushed/synced.
   2. Update journal commit marker to `COMMITTED`.

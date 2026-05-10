@@ -187,6 +187,9 @@
 
 ## 9) Definition of done (implementation)
 
+- [ ] Resolve known commit-protocol deviation:
+  - [ ] Replace hybrid marker/delete commit finalization with one consistent protocol.
+  - [ ] Prefer SQLite-like rollback-journal commit ordering and durable journal cleanup semantics.
 - [ ] All Phase 3 transaction commands implemented with documented semantics.
 - [ ] Journal-before-overwrite guarantee enforced.
 - [ ] Commit/rollback ordering semantics implemented and tested.
