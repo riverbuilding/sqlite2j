@@ -1,20 +1,38 @@
 package org.sqlite2j.vm;
 
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.sqlite2j.compiler.codegen.Instruction;
 import org.sqlite2j.compiler.codegen.Opcode;
 import org.sqlite2j.compiler.codegen.Program;
 import org.sqlite2j.core.schema.TableSchema;
+import org.sqlite2j.journal.RollbackJournalFile;
 import org.sqlite2j.sql.ast.ColumnDef;
 
 public final class VirtualMachine {
   private final VmDatabase database;
+  private TransactionState transactionState;
+  private final RollbackJournalFile rollbackJournalFile;
+  private Set<Integer> journaledPages;
 
   public VirtualMachine(VmDatabase database) {
     this.database = database;
+    this.transactionState = TransactionState.IDLE;
+    this.rollbackJournalFile = new RollbackJournalFile();
+    this.journaledPages = new HashSet<Integer>();
+  }
+
+  TransactionState transactionState() {
+    return transactionState;
   }
 
   public VmResult execute(Program program) {
@@ -53,9 +71,17 @@ public final class VirtualMachine {
         sortRowsIfRequested(rows, openReadTable, instruction.getP2());
         for (VmRow row : rows) result.addRow(row);
       } else if (opcode == Opcode.UPDATE_ROWS) {
+        journalBeforeOverwriteIfNeeded();
         applyUpdateRows(openWriteTable, currentWhere, instruction.getP1(), instruction.getP2());
       } else if (opcode == Opcode.DELETE_ROWS) {
+        journalBeforeOverwriteIfNeeded();
         applyDeleteRows(openWriteTable, currentWhere);
+      } else if (opcode == Opcode.BEGIN_TXN) {
+        handleBeginTxn();
+      } else if (opcode == Opcode.COMMIT_TXN) {
+        handleCommitTxn();
+      } else if (opcode == Opcode.ROLLBACK_TXN) {
+        handleRollbackTxn();
       } else if (opcode == Opcode.HALT) {
         break;
       } else {
@@ -63,6 +89,143 @@ public final class VirtualMachine {
       }
     }
     return result;
+  }
+
+
+  private void handleBeginTxn() {
+    if (transactionState == TransactionState.IN_TXN) {
+      throw new IllegalStateException("Transaction already active");
+    }
+    if (transactionState == TransactionState.COMMITTING || transactionState == TransactionState.ROLLING_BACK) {
+      throw new IllegalStateException("Transaction control is busy: " + transactionState);
+    }
+    transactionState = TransactionState.IN_TXN;
+    journaledPages = new HashSet<Integer>();
+  }
+
+  private void handleCommitTxn() {
+    if (transactionState == TransactionState.IDLE) {
+      throw new IllegalStateException("No active transaction");
+    }
+    if (transactionState == TransactionState.COMMITTING || transactionState == TransactionState.ROLLING_BACK) {
+      throw new IllegalStateException("Transaction control is busy: " + transactionState);
+    }
+
+    transactionState = TransactionState.COMMITTING;
+    try {
+      flushDatabaseDurability();
+      finalizeCommitJournal();
+      transactionState = TransactionState.IDLE;
+      journaledPages.clear();
+    } catch (IOException ex) {
+      transactionState = TransactionState.ROLLING_BACK;
+      throw new IllegalStateException("Commit finalization failed; recovery required", ex);
+    }
+  }
+
+
+  private void flushDatabaseDurability() throws IOException {
+    Path databasePath = database.catalogPath();
+    if (!Files.exists(databasePath)) return;
+
+    FileChannel channel = FileChannel.open(databasePath, StandardOpenOption.WRITE);
+    try {
+      channel.force(true);
+    } finally {
+      channel.close();
+    }
+  }
+
+  private void finalizeCommitJournal() throws IOException {
+    Path journalPath = rollbackJournalFile.derivePath(database.catalogPath());
+    if (!Files.exists(journalPath)) return;
+
+    Files.delete(journalPath);
+    forceDirectorySync(journalPath.getParent());
+  }
+
+
+  private void forceDirectorySync(Path directory) throws IOException {
+    if (directory == null || !Files.exists(directory)) return;
+    FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ);
+    try {
+      channel.force(true);
+    } finally {
+      channel.close();
+    }
+  }
+
+  private void handleRollbackTxn() {
+    if (transactionState == TransactionState.IDLE) {
+      throw new IllegalStateException("No active transaction");
+    }
+    if (transactionState == TransactionState.COMMITTING || transactionState == TransactionState.ROLLING_BACK) {
+      throw new IllegalStateException("Transaction control is busy: " + transactionState);
+    }
+
+    transactionState = TransactionState.ROLLING_BACK;
+    try {
+      restoreFromRollbackJournal();
+      transactionState = TransactionState.IDLE;
+      journaledPages.clear();
+    } catch (IOException ex) {
+      throw new IllegalStateException("Rollback failed; recovery required", ex);
+    }
+  }
+
+
+
+  private void restoreFromRollbackJournal() throws IOException {
+    Path databasePath = database.catalogPath();
+    Path journalPath = rollbackJournalFile.derivePath(databasePath);
+    if (!Files.exists(journalPath)) return;
+
+    org.sqlite2j.journal.ParsedJournal parsed = rollbackJournalFile.parse(journalPath);
+    for (org.sqlite2j.journal.JournalPageRecord record : parsed.getRecords()) {
+      if (record.getPageNumber() != 1) {
+        throw new IllegalStateException("Unsupported rollback page number: " + record.getPageNumber());
+      }
+      Files.write(databasePath, record.getPreimage());
+    }
+    flushDatabaseDurability();
+    Files.deleteIfExists(journalPath);
+    database.reloadFromDisk();
+  }
+
+  private void journalBeforeOverwriteIfNeeded() {
+    if (transactionState != TransactionState.IN_TXN) return;
+
+    final int pageNumber = 1;
+    if (journaledPages.contains(Integer.valueOf(pageNumber))) return;
+
+    try {
+      Path databasePath = database.catalogPath();
+      Path journalPath = rollbackJournalFile.derivePath(databasePath);
+      byte[] preimage = Files.exists(databasePath) ? Files.readAllBytes(databasePath) : new byte[0];
+      int pageSize = Math.max(1, preimage.length);
+      byte[] pageBytes = new byte[pageSize];
+      if (preimage.length > 0) {
+        System.arraycopy(preimage, 0, pageBytes, 0, Math.min(preimage.length, pageSize));
+      }
+
+      if (!Files.exists(journalPath)) {
+        rollbackJournalFile.create(journalPath, pageSize);
+      }
+      rollbackJournalFile.appendPageRecord(journalPath, pageNumber, pageBytes, pageSize);
+      forceJournalToDisk(journalPath);
+      journaledPages.add(Integer.valueOf(pageNumber));
+    } catch (IOException e) {
+      throw new IllegalStateException("Unable to persist rollback preimage", e);
+    }
+  }
+
+  private void forceJournalToDisk(Path journalPath) throws IOException {
+    FileChannel channel = FileChannel.open(journalPath, StandardOpenOption.WRITE);
+    try {
+      channel.force(true);
+    } finally {
+      channel.close();
+    }
   }
 
   private void applyUpdateRows(String tableName, String where, String columnName, String encodedLiteral) {

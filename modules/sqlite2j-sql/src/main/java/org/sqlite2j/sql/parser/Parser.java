@@ -4,9 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 import org.sqlite2j.sql.SqlErrorCode;
 import org.sqlite2j.sql.SqlParseException;
+import org.sqlite2j.sql.ast.BeginTransactionStatement;
 import org.sqlite2j.sql.ast.ColumnDef;
 import org.sqlite2j.sql.ast.ColumnExpression;
 import org.sqlite2j.sql.ast.ComparisonExpression;
+import org.sqlite2j.sql.ast.CommitStatement;
 import org.sqlite2j.sql.ast.ComparisonOperator;
 import org.sqlite2j.sql.ast.CreateTableStatement;
 import org.sqlite2j.sql.ast.DeleteStatement;
@@ -15,6 +17,7 @@ import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.LiteralExpression;
 import org.sqlite2j.sql.ast.LiteralValue;
 import org.sqlite2j.sql.ast.OrderByClause;
+import org.sqlite2j.sql.ast.RollbackStatement;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.Statement;
 import org.sqlite2j.sql.ast.UpdateAssignment;
@@ -33,7 +36,10 @@ public final class Parser {
     else if (match(TokenType.SELECT)) stmt = parseSelect();
     else if (match(TokenType.UPDATE)) stmt = parseUpdate();
     else if (match(TokenType.DELETE)) stmt = parseDelete();
-    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, SELECT * FROM, UPDATE, and DELETE are supported");
+    else if (match(TokenType.BEGIN)) stmt = parseBegin();
+    else if (match(TokenType.COMMIT)) stmt = parseCommit();
+    else if (match(TokenType.ROLLBACK)) stmt = parseRollback();
+    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, SELECT * FROM, UPDATE, DELETE, BEGIN, COMMIT, and ROLLBACK are supported");
 
     if (!check(TokenType.SEMICOLON) && !check(TokenType.EOF)) {
       throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Unsupported clause in Phase 1 near token: " + peek().getLexeme());
@@ -41,6 +47,30 @@ public final class Parser {
     match(TokenType.SEMICOLON);
     consume(TokenType.EOF, SqlErrorCode.UNEXPECTED_TOKEN, "Unexpected trailing input");
     return stmt;
+  }
+
+
+  private Statement parseBegin() {
+    if (match(TokenType.TRANSACTION)) {
+      return new BeginTransactionStatement();
+    }
+    if (check(TokenType.IDENTIFIER)) {
+      String modifier = peek().getLexeme();
+      if (modifier.equalsIgnoreCase("DEFERRED")
+          || modifier.equalsIgnoreCase("IMMEDIATE")
+          || modifier.equalsIgnoreCase("EXCLUSIVE")) {
+        throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "BEGIN modifier is not supported in Phase 3: " + modifier);
+      }
+    }
+    return new BeginTransactionStatement();
+  }
+
+  private Statement parseCommit() {
+    return new CommitStatement();
+  }
+
+  private Statement parseRollback() {
+    return new RollbackStatement();
   }
 
   private Statement parseDelete() {

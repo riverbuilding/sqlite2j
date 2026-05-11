@@ -2,9 +2,11 @@ package org.sqlite2j.compiler.codegen;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.sqlite2j.sql.ast.BeginTransactionStatement;
 import org.sqlite2j.sql.ast.ColumnDef;
 import org.sqlite2j.sql.ast.CreateTableStatement;
 import org.sqlite2j.sql.ast.ColumnExpression;
+import org.sqlite2j.sql.ast.CommitStatement;
 import org.sqlite2j.sql.ast.ComparisonExpression;
 import org.sqlite2j.sql.ast.DeleteStatement;
 import org.sqlite2j.sql.ast.Expression;
@@ -12,6 +14,7 @@ import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.LiteralExpression;
 import org.sqlite2j.sql.ast.LiteralValue;
 import org.sqlite2j.sql.ast.OrderByClause;
+import org.sqlite2j.sql.ast.RollbackStatement;
 import org.sqlite2j.sql.ast.UpdateStatement;
 import org.sqlite2j.sql.ast.SelectAllStatement;
 import org.sqlite2j.sql.ast.Statement;
@@ -31,6 +34,12 @@ public final class Phase1CodeGenerator {
       emitUpdate(program, (UpdateStatement) statement);
     } else if (statement instanceof DeleteStatement) {
       emitDelete(program, (DeleteStatement) statement);
+    } else if (statement instanceof BeginTransactionStatement) {
+      program.add(Opcode.BEGIN_TXN, null, null);
+    } else if (statement instanceof CommitStatement) {
+      program.add(Opcode.COMMIT_TXN, null, null);
+    } else if (statement instanceof RollbackStatement) {
+      program.add(Opcode.ROLLBACK_TXN, null, null);
     } else {
       throw new IllegalArgumentException("Unsupported statement type: " + statement.getClass().getName());
     }

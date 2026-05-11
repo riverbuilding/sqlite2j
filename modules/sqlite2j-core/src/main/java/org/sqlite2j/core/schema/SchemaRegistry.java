@@ -34,6 +34,10 @@ public final class SchemaRegistry {
     return Collections.unmodifiableMap(tables);
   }
 
+  public void reset() {
+    tables.clear();
+  }
+
   private String normalize(String name) {
     return name.toLowerCase();
   }

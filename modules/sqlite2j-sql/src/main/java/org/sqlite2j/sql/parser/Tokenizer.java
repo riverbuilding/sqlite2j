@@ -95,6 +95,10 @@ public final class Tokenizer {
       case "BY" -> TokenType.BY;
       case "ASC" -> TokenType.ASC;
       case "DESC" -> TokenType.DESC;
+      case "BEGIN" -> TokenType.BEGIN;
+      case "TRANSACTION" -> TokenType.TRANSACTION;
+      case "COMMIT" -> TokenType.COMMIT;
+      case "ROLLBACK" -> TokenType.ROLLBACK;
       case "NULL" -> TokenType.NULL;
       case "AND" -> TokenType.AND;
       case "OR" -> TokenType.OR;

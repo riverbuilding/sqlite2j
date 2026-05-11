@@ -1,5 +1,6 @@
 package org.sqlite2j.vm;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -154,6 +155,225 @@ class VirtualMachineTest {
         () -> vm.execute(compiler.compile("SELECT * FROM users ORDER BY missing;")));
     assertEquals("Unknown column: missing", ex.getMessage());
   }
+
+  @Test
+  void firstMutationInTransactionCreatesJournalBeforeOverwrite() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    byte[] before = Files.readAllBytes(dbPath);
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    org.sqlite2j.journal.RollbackJournalFile journal = new org.sqlite2j.journal.RollbackJournalFile();
+    org.sqlite2j.journal.ParsedJournal parsed = journal.parse(journalPath);
+
+    assertEquals(1, parsed.getRecords().size());
+    assertEquals(Math.max(1, before.length), parsed.getHeader().getPageSize());
+    byte[] expected = new byte[Math.max(1, before.length)];
+    System.arraycopy(before, 0, expected, 0, Math.min(before.length, expected.length));
+    assertArrayEquals(expected, parsed.getRecords().get(0).getPreimage());
+  }
+
+  @Test
+  void repeatedMutationsInSameTransactionDoNotDuplicatePreimage() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'carl' WHERE id = 1;"));
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    org.sqlite2j.journal.RollbackJournalFile journal = new org.sqlite2j.journal.RollbackJournalFile();
+    org.sqlite2j.journal.ParsedJournal parsed = journal.parse(journalPath);
+    assertEquals(1, parsed.getRecords().size());
+  }
+
+
+  @Test
+  void commitFinalizationRemovesHotJournal() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    assertEquals(true, Files.exists(journalPath));
+
+    vm.execute(compiler.compile("COMMIT;"));
+    assertEquals(false, Files.exists(journalPath));
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+  }
+
+
+  @Test
+  void beginWriteCommitPersistsAcrossReopen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+    vm.execute(compiler.compile("COMMIT;"));
+
+    VirtualMachine reopened = new VirtualMachine(new VmDatabase(dbPath));
+    VmResult result = reopened.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("bob", result.getRows().get(0).getValues().get(1).getValue());
+  }
+
+  @Test
+  void beginWriteRollbackDiscardsAcrossReopen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+    vm.execute(compiler.compile("ROLLBACK;"));
+
+    VirtualMachine reopened = new VirtualMachine(new VmDatabase(dbPath));
+    VmResult result = reopened.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+  }
+
+
+  @Test
+  void reopenRecoversIncompleteJournalToPreBeginState() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+
+    VmDatabase reopened = new VmDatabase(dbPath);
+    VirtualMachine vm2 = new VirtualMachine(reopened);
+    VmResult recovered = vm2.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", recovered.getRows().get(0).getValues().get(1).getValue());
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    assertEquals(false, Files.exists(journalPath));
+  }
+
+  @Test
+  void reopenCleansCommittedJournalAsStale() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    byte[] snapshot = Files.readAllBytes(dbPath);
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    org.sqlite2j.journal.RollbackJournalFile journal = new org.sqlite2j.journal.RollbackJournalFile();
+    journal.create(journalPath, Math.max(1, snapshot.length));
+    byte[] page = new byte[Math.max(1, snapshot.length)];
+    System.arraycopy(snapshot, 0, page, 0, Math.min(snapshot.length, page.length));
+    journal.appendPageRecord(journalPath, 1, page, page.length);
+    journal.markCommitted(journalPath);
+
+    VmDatabase reopened = new VmDatabase(dbPath);
+    VirtualMachine vm2 = new VirtualMachine(reopened);
+    VmResult result = vm2.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+    assertEquals(false, Files.exists(journalPath));
+  }
+
+
+  @Test
+  void rollbackRestoresPreBeginStateAndRemovesJournal() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    vm.execute(compiler.compile("BEGIN;"));
+    vm.execute(compiler.compile("UPDATE users SET name = 'bob' WHERE id = 1;"));
+    vm.execute(compiler.compile("ROLLBACK;"));
+
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+
+    java.nio.file.Path journalPath = dbPath.resolveSibling(dbPath.getFileName().toString() + "-journal");
+    assertEquals(false, Files.exists(journalPath));
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+  }
+
+
+  @Test
+  void commandRejectedDuringTransitionalState() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    java.lang.reflect.Field field = VirtualMachine.class.getDeclaredField("transactionState");
+    field.setAccessible(true);
+    field.set(vm, TransactionState.COMMITTING);
+
+    RuntimeException ex = assertThrows(RuntimeException.class, () -> vm.execute(compiler.compile("BEGIN;")));
+    assertEquals("Transaction control is busy: COMMITTING", ex.getMessage());
+  }
+
+
+  @Test
+  void transactionStateTransitionsAreDeterministic() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+    vm.execute(compiler.compile("BEGIN;"));
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+    vm.execute(compiler.compile("COMMIT;"));
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+
+    vm.execute(compiler.compile("BEGIN;"));
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+    vm.execute(compiler.compile("ROLLBACK;"));
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+  }
+
+  @Test
+  void transactionStateMisuseDoesNotMutateState() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+
+    RuntimeException commitNoTxn = assertThrows(RuntimeException.class, () -> vm.execute(compiler.compile("COMMIT;")));
+    assertEquals("No active transaction", commitNoTxn.getMessage());
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+
+    RuntimeException rollbackNoTxn = assertThrows(RuntimeException.class, () -> vm.execute(compiler.compile("ROLLBACK;")));
+    assertEquals("No active transaction", rollbackNoTxn.getMessage());
+    assertEquals(TransactionState.IDLE, vm.transactionState());
+
+    vm.execute(compiler.compile("BEGIN;"));
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+
+    RuntimeException nestedBegin = assertThrows(RuntimeException.class, () -> vm.execute(compiler.compile("BEGIN;")));
+    assertEquals("Transaction already active", nestedBegin.getMessage());
+    assertEquals(TransactionState.IN_TXN, vm.transactionState());
+  }
+
 
   @Test
   void updateWhereNoMatchesLeavesRowsUnchanged() throws Exception {
