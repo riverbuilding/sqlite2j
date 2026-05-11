@@ -65,13 +65,7 @@ public final class VirtualMachine {
         currentWhere = instruction.getP2();
       } else if (opcode == Opcode.RESULT_ROW) {
         if (cursor == null) throw new IllegalStateException("No open cursor for RESULT_ROW");
-        List<VmRow> rows = new ArrayList<VmRow>();
-        while (cursor.next()) {
-          VmRow row = cursor.current();
-          if (matchesWhere(openReadTable, row, currentWhere)) {
-            rows.add(row);
-          }
-        }
+        List<VmRow> rows = resolveRowsForSelect(openReadTable, cursor, currentWhere);
         sortRowsIfRequested(rows, openReadTable, instruction.getP2());
         for (VmRow row : rows) result.addRow(row);
       } else if (opcode == Opcode.UPDATE_ROWS) {
@@ -93,6 +87,30 @@ public final class VirtualMachine {
       }
     }
     return result;
+  }
+
+  private List<VmRow> resolveRowsForSelect(String tableName, VmCursor cursor, String where) {
+    if (tableName == null) throw new IllegalStateException("No open table for SELECT");
+    WhereParts whereParts = parseWhere(where);
+    if (whereParts != null && "EQ".equals(whereParts.operator)) {
+      java.util.Optional<String> indexedColumn = database.findIndexColumnForTable(tableName);
+      if (indexedColumn.isPresent() && indexedColumn.get().equalsIgnoreCase(whereParts.columnName)) {
+        try {
+          return database.lookupRowsByIndex(tableName, whereParts.columnName, parseEncodedLiteral(whereParts.literal));
+        } catch (RuntimeException ex) {
+          // Deterministic safety fallback: if index metadata is invalid, execute table scan.
+        }
+      }
+    }
+
+    List<VmRow> rows = new ArrayList<VmRow>();
+    while (cursor.next()) {
+      VmRow row = cursor.current();
+      if (matchesWhere(tableName, row, where)) {
+        rows.add(row);
+      }
+    }
+    return rows;
   }
 
 
@@ -282,23 +300,39 @@ public final class VirtualMachine {
   }
 
   private boolean matchesWhere(String tableName, VmRow row, String where) {
-    if (where == null || where.isEmpty()) return true;
+    WhereParts parts = parseWhere(where);
+    if (parts == null) return true;
+    int columnIndex = findColumnIndex(tableName, parts.columnName);
+    VmValue leftValue = row.getValues().get(columnIndex);
+    VmValue rightValue = parseEncodedLiteral(parts.literal);
+    return compareByOperator(compareValuesForWhere(leftValue, rightValue), parts.operator);
+  }
+
+  private WhereParts parseWhere(String where) {
+    if (where == null || where.isEmpty()) return null;
     int first = where.indexOf(':');
     int second = where.indexOf(':', first + 1);
     if (first <= 0 || second <= first) throw new IllegalStateException("Invalid WHERE encoding: " + where);
-
     String left = where.substring(0, first);
     String op = where.substring(first + 1, second);
     String right = where.substring(second + 1);
     if (!left.startsWith("C(") || !left.endsWith(")")) throw new IllegalStateException("Invalid WHERE column encoding: " + left);
     if (!right.startsWith("L(") || !right.endsWith(")")) throw new IllegalStateException("Invalid WHERE literal encoding: " + right);
-
     String columnName = left.substring(2, left.length() - 1);
     String literal = right.substring(2, right.length() - 1);
-    int columnIndex = findColumnIndex(tableName, columnName);
-    VmValue leftValue = row.getValues().get(columnIndex);
-    VmValue rightValue = parseEncodedLiteral(literal);
-    return compareByOperator(compareValuesForWhere(leftValue, rightValue), op);
+    return new WhereParts(columnName, op, literal);
+  }
+
+  private static final class WhereParts {
+    final String columnName;
+    final String operator;
+    final String literal;
+
+    WhereParts(String columnName, String operator, String literal) {
+      this.columnName = columnName;
+      this.operator = operator;
+      this.literal = literal;
+    }
   }
 
   private VmValue parseEncodedLiteral(String literal) {

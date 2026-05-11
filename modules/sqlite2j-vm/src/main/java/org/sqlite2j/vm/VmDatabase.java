@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import org.sqlite2j.journal.CommitMarker;
 import org.sqlite2j.journal.JournalPageRecord;
 import org.sqlite2j.journal.ParsedJournal;
@@ -85,6 +86,32 @@ public final class VmDatabase {
     }
     tableRows.put(normalize(tableName), new ArrayList<VmRow>(rows));
     save();
+  }
+
+  public Optional<String> findIndexColumnForTable(String tableName) {
+    for (IndexSchema indexSchema : schemaRegistry.indexesView().values()) {
+      if (indexSchema.getTableName().equalsIgnoreCase(tableName)) {
+        return Optional.of(indexSchema.getColumnName());
+      }
+    }
+    return Optional.empty();
+  }
+
+  public List<VmRow> lookupRowsByIndex(String tableName, String columnName, VmValue value) {
+    TableSchema tableSchema = schemaRegistry.findTable(tableName)
+        .orElseThrow(() -> new IllegalStateException("Table not found: " + tableName));
+    int columnIndex = findColumnIndex(tableSchema, columnName);
+    List<VmRow> rows = rowsView(tableName);
+    List<VmRow> out = new ArrayList<VmRow>();
+    for (VmRow row : rows) {
+      if (columnIndex >= row.getValues().size()) {
+        throw new IllegalStateException("Invalid index metadata for table " + tableName + ": " + columnName);
+      }
+      if (compareValues(row.getValues().get(columnIndex), value) == 0) {
+        out.add(row);
+      }
+    }
+    return out;
   }
 
 
@@ -252,5 +279,18 @@ public final class VmDatabase {
       }
     }
     throw new IllegalStateException("Unknown column for index: " + columnName);
+  }
+
+  private int compareValues(VmValue left, VmValue right) {
+    if (left.getType() != right.getType()) {
+      return left.getType().ordinal() - right.getType().ordinal();
+    }
+    if (left.getType() == VmValue.Type.INT) {
+      return Long.compare((Long) left.getValue(), (Long) right.getValue());
+    }
+    if (left.getType() == VmValue.Type.TEXT) {
+      return ((String) left.getValue()).compareTo((String) right.getValue());
+    }
+    return 0;
   }
 }

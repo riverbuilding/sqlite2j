@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import org.junit.jupiter.api.Test;
 import org.sqlite2j.compiler.codegen.CompilerFacade;
 import org.sqlite2j.compiler.codegen.Program;
+import org.sqlite2j.core.schema.IndexSchema;
 
 class VirtualMachineTest {
   private final CompilerFacade compiler = new CompilerFacade();
@@ -77,6 +78,35 @@ class VirtualMachineTest {
     RuntimeException ex = assertThrows(RuntimeException.class,
         () -> vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (id);")));
     assertEquals("Index already exists: idx_users_name", ex.getMessage());
+  }
+
+  @Test
+  void selectWithIndexedEqualityReturnsSameRowsAsTableScan() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (3, 'alice');"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    assertEquals(2, result.getRows().size());
+    assertEquals(1L, result.getRows().get(0).getValues().get(0).getValue());
+    assertEquals(3L, result.getRows().get(1).getValues().get(0).getValue());
+  }
+
+  @Test
+  void invalidIndexMetadataFallsBackToScanDeterministically() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    db.getSchemaRegistry().registerIndex(new IndexSchema("idx_bad", "users", "missing"));
+
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    assertEquals(1, result.getRows().size());
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
   }
 
   @Test
