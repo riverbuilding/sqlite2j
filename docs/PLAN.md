@@ -204,13 +204,20 @@ sqlite2j/
 - Update index maintenance on DML
 - Deterministic index behavior tests
 
-### Phase 5 — Compatibility push
+### Phase 5 — Storage engine convergence (B-tree + pager on-disk)
+- Replace temporary VM catalog/row persistence format with pager-backed on-disk pages
+- Route table and index reads/writes through `sqlite2j-btree` + `sqlite2j-pager`
+- Persist table/index data in deterministic page/cell encoding
+- Keep transaction/journal semantics compatible with the new page-backed path
+- Add reopen/recovery tests that assert behavior parity vs current VM-layer persistence
+
+### Phase 6 — Compatibility push
 - SQL semantics alignment
 - Error message/code alignment
 - File format compatibility experiments
 - Differential tests against SQLite 2.0
 
-### Phase 6 — Hardening + CLI polish
+### Phase 7 — Hardening + CLI polish
 - Recovery torture tests
 - Locking contention tests
 - Shell usability and docs
