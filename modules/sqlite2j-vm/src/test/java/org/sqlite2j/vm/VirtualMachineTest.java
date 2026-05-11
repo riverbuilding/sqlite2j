@@ -55,6 +55,31 @@ class VirtualMachineTest {
   }
 
   @Test
+  void createIndexValidatesAndPersistsMetadataAcrossReopen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    assertEquals(1, db.getSchemaRegistry().indexesView().size());
+
+    VmDatabase reopened = new VmDatabase(dbPath);
+    assertEquals(1, reopened.getSchemaRegistry().indexesView().size());
+  }
+
+  @Test
+  void createIndexDuplicateNameFailsDeterministically() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    RuntimeException ex = assertThrows(RuntimeException.class,
+        () -> vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (id);")));
+    assertEquals("Index already exists: idx_users_name", ex.getMessage());
+  }
+
+  @Test
   void selectOrderByUsesDeterministicSortAndStableTies() throws Exception {
     VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);

@@ -82,6 +82,8 @@ public final class Tokenizer {
     return switch (word.toUpperCase(Locale.ROOT)) {
       case "CREATE" -> TokenType.CREATE;
       case "TABLE" -> TokenType.TABLE;
+      case "INDEX" -> TokenType.INDEX;
+      case "ON" -> TokenType.ON;
       case "INSERT" -> TokenType.INSERT;
       case "INTO" -> TokenType.INTO;
       case "VALUES" -> TokenType.VALUES;

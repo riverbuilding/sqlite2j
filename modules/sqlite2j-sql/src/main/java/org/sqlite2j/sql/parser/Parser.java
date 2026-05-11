@@ -11,6 +11,7 @@ import org.sqlite2j.sql.ast.ComparisonExpression;
 import org.sqlite2j.sql.ast.CommitStatement;
 import org.sqlite2j.sql.ast.ComparisonOperator;
 import org.sqlite2j.sql.ast.CreateTableStatement;
+import org.sqlite2j.sql.ast.CreateIndexStatement;
 import org.sqlite2j.sql.ast.DeleteStatement;
 import org.sqlite2j.sql.ast.Expression;
 import org.sqlite2j.sql.ast.InsertStatement;
@@ -31,7 +32,7 @@ public final class Parser {
     this.tokens = new Tokenizer().tokenize(sql);
     this.current = 0;
     Statement stmt;
-    if (match(TokenType.CREATE)) stmt = parseCreateTable();
+    if (match(TokenType.CREATE)) stmt = parseCreate();
     else if (match(TokenType.INSERT)) stmt = parseInsert();
     else if (match(TokenType.SELECT)) stmt = parseSelect();
     else if (match(TokenType.UPDATE)) stmt = parseUpdate();
@@ -39,7 +40,7 @@ public final class Parser {
     else if (match(TokenType.BEGIN)) stmt = parseBegin();
     else if (match(TokenType.COMMIT)) stmt = parseCommit();
     else if (match(TokenType.ROLLBACK)) stmt = parseRollback();
-    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, INSERT INTO, SELECT * FROM, UPDATE, DELETE, BEGIN, COMMIT, and ROLLBACK are supported");
+    else throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE, CREATE INDEX, INSERT INTO, SELECT * FROM, UPDATE, DELETE, BEGIN, COMMIT, and ROLLBACK are supported");
 
     if (!check(TokenType.SEMICOLON) && !check(TokenType.EOF)) {
       throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Unsupported clause in Phase 1 near token: " + peek().getLexeme());
@@ -47,6 +48,12 @@ public final class Parser {
     match(TokenType.SEMICOLON);
     consume(TokenType.EOF, SqlErrorCode.UNEXPECTED_TOKEN, "Unexpected trailing input");
     return stmt;
+  }
+
+  private Statement parseCreate() {
+    if (match(TokenType.TABLE)) return parseCreateTable();
+    if (match(TokenType.INDEX)) return parseCreateIndex();
+    throw error(peek(), SqlErrorCode.UNSUPPORTED_STATEMENT, "Only CREATE TABLE and CREATE INDEX are supported");
   }
 
 
@@ -111,7 +118,6 @@ public final class Parser {
   }
 
   private Statement parseCreateTable() {
-    consume(TokenType.TABLE, SqlErrorCode.UNEXPECTED_TOKEN, "Expected TABLE after CREATE");
     String tableName = identifier("Expected table name");
     consume(TokenType.LPAREN, SqlErrorCode.UNEXPECTED_TOKEN, "Expected '(' after table name");
     List<ColumnDef> cols = new ArrayList<>();
@@ -122,6 +128,16 @@ public final class Parser {
     } while (match(TokenType.COMMA));
     consume(TokenType.RPAREN, SqlErrorCode.UNEXPECTED_TOKEN, "Expected ')' after column definitions");
     return new CreateTableStatement(tableName, cols);
+  }
+
+  private Statement parseCreateIndex() {
+    String indexName = identifier("Expected index name after CREATE INDEX");
+    consume(TokenType.ON, SqlErrorCode.UNEXPECTED_TOKEN, "Expected ON after index name");
+    String tableName = identifier("Expected table name after ON");
+    consume(TokenType.LPAREN, SqlErrorCode.UNEXPECTED_TOKEN, "Expected '(' after table name");
+    String columnName = identifier("Expected column name in index definition");
+    consume(TokenType.RPAREN, SqlErrorCode.UNEXPECTED_TOKEN, "Expected ')' after index column");
+    return new CreateIndexStatement(indexName, tableName, columnName);
   }
 
   private Statement parseInsert() {

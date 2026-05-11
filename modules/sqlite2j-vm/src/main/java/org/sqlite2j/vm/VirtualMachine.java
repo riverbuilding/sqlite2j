@@ -15,6 +15,7 @@ import org.sqlite2j.compiler.codegen.Instruction;
 import org.sqlite2j.compiler.codegen.Opcode;
 import org.sqlite2j.compiler.codegen.Program;
 import org.sqlite2j.core.schema.TableSchema;
+import org.sqlite2j.core.schema.IndexSchema;
 import org.sqlite2j.journal.RollbackJournalFile;
 import org.sqlite2j.sql.ast.ColumnDef;
 
@@ -47,6 +48,9 @@ public final class VirtualMachine {
       Opcode opcode = instruction.getOpcode();
       if (opcode == Opcode.CREATE_TABLE) {
         database.createTable(new TableSchema(instruction.getP1(), parseColumns(instruction.getP2())));
+      } else if (opcode == Opcode.CREATE_INDEX) {
+        String[] parts = instruction.getP2().split(":", 2);
+        database.createIndex(new IndexSchema(instruction.getP1(), parts[0], parts[1]));
       } else if (opcode == Opcode.OPEN_WRITE) {
         openWriteTable = instruction.getP1();
       } else if (opcode == Opcode.OPEN_READ) {

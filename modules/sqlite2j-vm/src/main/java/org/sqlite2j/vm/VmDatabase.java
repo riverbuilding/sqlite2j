@@ -17,6 +17,7 @@ import org.sqlite2j.journal.ParsedJournal;
 import org.sqlite2j.journal.RollbackJournalFile;
 import org.sqlite2j.core.schema.SchemaRegistry;
 import org.sqlite2j.core.schema.TableSchema;
+import org.sqlite2j.core.schema.IndexSchema;
 import org.sqlite2j.sql.ast.ColumnDef;
 
 public final class VmDatabase {
@@ -48,6 +49,21 @@ public final class VmDatabase {
     List<VmRow> rows = tableRows.get(normalize(tableName));
     if (rows == null) throw new IllegalStateException("Table not found: " + tableName);
     rows.add(row);
+    save();
+  }
+
+  public void createIndex(IndexSchema indexSchema) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName())
+        .orElseThrow(() -> new IllegalStateException("Table not found: " + indexSchema.getTableName()));
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    List<VmRow> rows = tableRows.get(normalize(indexSchema.getTableName()));
+    for (VmRow row : rows) {
+      if (columnIndex >= row.getValues().size()) {
+        throw new IllegalStateException("Unable to build index; row column missing for " + indexSchema.getColumnName());
+      }
+      row.getValues().get(columnIndex);
+    }
+    schemaRegistry.registerIndex(indexSchema);
     save();
   }
 
@@ -127,6 +143,7 @@ public final class VmDatabase {
       for (int i = 1; i < lines.size(); i++) {
         String line = lines.get(i);
         if (line.startsWith("TABLE\t")) loadTable(line);
+        else if (line.startsWith("INDEX\t")) loadIndex(line);
         else if (line.startsWith("ROW\t")) loadRow(line);
       }
     } catch (IOException e) {
@@ -161,6 +178,12 @@ public final class VmDatabase {
     rows.add(new VmRow(values));
   }
 
+  private void loadIndex(String line) {
+    String[] parts = line.split("\t", -1);
+    if (parts.length < 4) throw new IllegalStateException("Invalid index line: " + line);
+    schemaRegistry.registerIndex(new IndexSchema(parts[1], parts[2], parts[3]));
+  }
+
   private void save() {
     List<String> lines = new ArrayList<String>();
     lines.add(FORMAT_HEADER);
@@ -172,6 +195,9 @@ public final class VmDatabase {
           lines.add(encodeRow(table.getName(), row));
         }
       }
+    }
+    for (IndexSchema index : schemaRegistry.indexesView().values()) {
+      lines.add("INDEX\t" + index.getName() + "\t" + index.getTableName() + "\t" + index.getColumnName());
     }
     try {
       Path parent = catalogPath.toAbsolutePath().getParent();
@@ -217,5 +243,14 @@ public final class VmDatabase {
 
   private String normalize(String name) {
     return name.toLowerCase(Locale.ROOT);
+  }
+
+  private int findColumnIndex(TableSchema tableSchema, String columnName) {
+    for (int i = 0; i < tableSchema.getColumns().size(); i++) {
+      if (tableSchema.getColumns().get(i).getName().equalsIgnoreCase(columnName)) {
+        return i;
+      }
+    }
+    throw new IllegalStateException("Unknown column for index: " + columnName);
   }
 }

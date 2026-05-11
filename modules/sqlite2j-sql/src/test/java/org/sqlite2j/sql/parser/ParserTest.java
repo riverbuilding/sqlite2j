@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.sqlite2j.sql.SqlErrorCode;
 import org.sqlite2j.sql.SqlParseException;
 import org.sqlite2j.sql.ast.CreateTableStatement;
+import org.sqlite2j.sql.ast.CreateIndexStatement;
 import org.sqlite2j.sql.ast.Expression;
 import org.sqlite2j.sql.ast.InsertStatement;
 import org.sqlite2j.sql.ast.SelectAllStatement;
@@ -29,6 +30,15 @@ class ParserTest {
     var create = assertInstanceOf(CreateTableStatement.class, stmt);
     assertEquals("users", create.getTableName());
     assertEquals(2, create.getColumns().size());
+  }
+
+  @Test
+  void parsesCreateIndex() {
+    var stmt = parser.parse("CREATE INDEX idx_users_name ON users (name);");
+    var create = assertInstanceOf(CreateIndexStatement.class, stmt);
+    assertEquals("idx_users_name", create.getIndexName());
+    assertEquals("users", create.getTableName());
+    assertEquals("name", create.getColumnName());
   }
 
   @Test
