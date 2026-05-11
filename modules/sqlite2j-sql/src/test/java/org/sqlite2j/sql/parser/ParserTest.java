@@ -42,6 +42,20 @@ class ParserTest {
   }
 
   @Test
+  void rejectsCreateIndexMissingOnClause() {
+    SqlParseException ex = assertThrows(SqlParseException.class,
+        () -> parser.parse("CREATE INDEX idx_users_name users (name);"));
+    assertEquals(SqlErrorCode.UNEXPECTED_TOKEN, ex.getCode());
+  }
+
+  @Test
+  void rejectsCreateIndexMultipleColumnsAsUnsupportedVariant() {
+    SqlParseException ex = assertThrows(SqlParseException.class,
+        () -> parser.parse("CREATE INDEX idx_users_name ON users (name, id);"));
+    assertEquals(SqlErrorCode.UNEXPECTED_TOKEN, ex.getCode());
+  }
+
+  @Test
   void parsesInsert() {
     var stmt = parser.parse("INSERT INTO users VALUES (1, 'alice');");
     var insert = assertInstanceOf(InsertStatement.class, stmt);

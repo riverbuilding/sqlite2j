@@ -24,6 +24,7 @@ public final class VirtualMachine {
   private TransactionState transactionState;
   private final RollbackJournalFile rollbackJournalFile;
   private Set<Integer> journaledPages;
+  private boolean lastSelectUsedIndexPath;
 
   public VirtualMachine(VmDatabase database) {
     this.database = database;
@@ -36,7 +37,12 @@ public final class VirtualMachine {
     return transactionState;
   }
 
+  boolean lastSelectUsedIndexPath() {
+    return lastSelectUsedIndexPath;
+  }
+
   public VmResult execute(Program program) {
+    lastSelectUsedIndexPath = false;
     VmResult result = new VmResult();
     VmCursor cursor = null;
     VmRow registerRecord = null;
@@ -96,6 +102,7 @@ public final class VirtualMachine {
       java.util.Optional<String> indexedColumn = database.findIndexColumnForTable(tableName);
       if (indexedColumn.isPresent() && indexedColumn.get().equalsIgnoreCase(whereParts.columnName)) {
         try {
+          lastSelectUsedIndexPath = true;
           return database.lookupRowsByIndex(tableName, whereParts.columnName, parseEncodedLiteral(whereParts.literal));
         } catch (RuntimeException ex) {
           // Deterministic safety fallback: if index metadata is invalid, execute table scan.
