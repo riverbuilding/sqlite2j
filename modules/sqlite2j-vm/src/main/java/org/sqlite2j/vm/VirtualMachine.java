@@ -140,9 +140,19 @@ public final class VirtualMachine {
     Path journalPath = rollbackJournalFile.derivePath(database.catalogPath());
     if (!Files.exists(journalPath)) return;
 
-    rollbackJournalFile.markCommitted(journalPath);
-    forceJournalToDisk(journalPath);
     Files.delete(journalPath);
+    forceDirectorySync(journalPath.getParent());
+  }
+
+
+  private void forceDirectorySync(Path directory) throws IOException {
+    if (directory == null || !Files.exists(directory)) return;
+    FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ);
+    try {
+      channel.force(true);
+    } finally {
+      channel.close();
+    }
   }
 
   private void handleRollbackTxn() {

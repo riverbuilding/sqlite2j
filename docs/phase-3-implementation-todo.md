@@ -187,13 +187,13 @@
 
 ## 9) Definition of done (implementation)
 
-- [ ] Resolve known commit-protocol deviation:
-  - [ ] Replace hybrid marker/delete commit finalization with one consistent protocol.
-  - [ ] Prefer SQLite-like rollback-journal commit ordering and durable journal cleanup semantics.
-- [ ] All Phase 3 transaction commands implemented with documented semantics.
-- [ ] Journal-before-overwrite guarantee enforced.
-- [ ] Commit/rollback ordering semantics implemented and tested.
-- [ ] Crash recovery on reopen implemented and idempotent.
-- [ ] Non-goals remain out of scope (no WAL/savepoints/concurrency expansion/optimizations that weaken correctness).
-- [ ] Full test suite passes via:
-  - [ ] `mvn test`
+- [x] Resolve known commit-protocol deviation:
+  - [x] Replace hybrid marker/delete commit finalization with one consistent protocol.
+  - [x] Prefer SQLite-like rollback-journal commit ordering and durable journal cleanup semantics.
+- [x] All Phase 3 transaction commands implemented with documented semantics.
+- [x] Journal-before-overwrite guarantee enforced.
+- [x] Commit/rollback ordering semantics implemented and tested.
+- [x] Crash recovery on reopen implemented and idempotent.
+- [x] Non-goals remain out of scope (no WAL/savepoints/concurrency expansion/optimizations that weaken correctness).
+- [x] Full test suite passes via:
+  - [x] `mvn test`
