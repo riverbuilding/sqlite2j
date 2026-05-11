@@ -97,6 +97,29 @@ class VirtualMachineTest {
   }
 
   @Test
+  void indexMaintenanceTracksInsertUpdateDelete() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    VmResult insertLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    assertEquals(1, insertLookup.getRows().size());
+
+    vm.execute(compiler.compile("UPDATE users SET name = 'carl' WHERE id = 1;"));
+    VmResult oldKeyLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    VmResult newKeyLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'carl';"));
+    assertEquals(0, oldKeyLookup.getRows().size());
+    assertEquals(1, newKeyLookup.getRows().size());
+
+    vm.execute(compiler.compile("DELETE FROM users WHERE id = 1;"));
+    VmResult deletedLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'carl';"));
+    assertEquals(0, deletedLookup.getRows().size());
+  }
+
+  @Test
   void invalidIndexMetadataFallsBackToScanDeterministically() throws Exception {
     VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);

@@ -26,6 +26,7 @@ public final class VmDatabase {
 
   private final SchemaRegistry schemaRegistry;
   private final Map<String, List<VmRow>> tableRows = new LinkedHashMap<String, List<VmRow>>();
+  private final Map<String, Map<String, List<VmRow>>> indexEntries = new LinkedHashMap<String, Map<String, List<VmRow>>>();
   private final Path catalogPath;
   private final RollbackJournalFile rollbackJournalFile = new RollbackJournalFile();
 
@@ -34,6 +35,7 @@ public final class VmDatabase {
     this.schemaRegistry = new SchemaRegistry(catalogPath);
     recoverJournalIfPresent();
     load();
+    rebuildAllIndexes();
   }
 
   public SchemaRegistry getSchemaRegistry() { return schemaRegistry; }
@@ -50,6 +52,7 @@ public final class VmDatabase {
     List<VmRow> rows = tableRows.get(normalize(tableName));
     if (rows == null) throw new IllegalStateException("Table not found: " + tableName);
     rows.add(row);
+    onInsertRow(tableName, row);
     save();
   }
 
@@ -65,6 +68,7 @@ public final class VmDatabase {
       row.getValues().get(columnIndex);
     }
     schemaRegistry.registerIndex(indexSchema);
+    rebuildIndex(indexSchema);
     save();
   }
 
@@ -98,27 +102,46 @@ public final class VmDatabase {
   }
 
   public List<VmRow> lookupRowsByIndex(String tableName, String columnName, VmValue value) {
-    TableSchema tableSchema = schemaRegistry.findTable(tableName)
+    IndexSchema indexSchema = findIndexSchema(tableName, columnName);
+    Map<String, List<VmRow>> entries = indexEntries.get(normalize(indexSchema.getName()));
+    if (entries == null) throw new IllegalStateException("Missing index entries for index " + indexSchema.getName());
+    List<VmRow> rows = entries.get(encodeIndexKey(value));
+    return rows == null ? new ArrayList<VmRow>() : new ArrayList<VmRow>(rows);
+  }
+
+  public void onInsertRow(String tableName, VmRow row) {
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      addRowToIndex(indexSchema, row);
+    }
+  }
+
+  public void onRowUpdated(String tableName, VmRow oldRow, VmRow newRow) {
+    TableSchema schema = schemaRegistry.findTable(tableName)
         .orElseThrow(() -> new IllegalStateException("Table not found: " + tableName));
-    int columnIndex = findColumnIndex(tableSchema, columnName);
-    List<VmRow> rows = rowsView(tableName);
-    List<VmRow> out = new ArrayList<VmRow>();
-    for (VmRow row : rows) {
-      if (columnIndex >= row.getValues().size()) {
-        throw new IllegalStateException("Invalid index metadata for table " + tableName + ": " + columnName);
-      }
-      if (compareValues(row.getValues().get(columnIndex), value) == 0) {
-        out.add(row);
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      int columnIndex = findColumnIndex(schema, indexSchema.getColumnName());
+      VmValue oldValue = oldRow.getValues().get(columnIndex);
+      VmValue newValue = newRow.getValues().get(columnIndex);
+      if (compareValues(oldValue, newValue) != 0) {
+        removeRowFromIndex(indexSchema, oldRow);
+        addRowToIndex(indexSchema, newRow);
       }
     }
-    return out;
+  }
+
+  public void onRowDeleted(String tableName, VmRow row) {
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      removeRowFromIndex(indexSchema, row);
+    }
   }
 
 
   void reloadFromDisk() {
     tableRows.clear();
+    indexEntries.clear();
     schemaRegistry.reset();
     load();
+    rebuildAllIndexes();
   }
 
 
@@ -292,5 +315,69 @@ public final class VmDatabase {
       return ((String) left.getValue()).compareTo((String) right.getValue());
     }
     return 0;
+  }
+
+  private void rebuildAllIndexes() {
+    indexEntries.clear();
+    for (IndexSchema indexSchema : schemaRegistry.indexesView().values()) {
+      rebuildIndex(indexSchema);
+    }
+  }
+
+  private void rebuildIndex(IndexSchema indexSchema) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName())
+        .orElseThrow(() -> new IllegalStateException("Table not found: " + indexSchema.getTableName()));
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    Map<String, List<VmRow>> entries = new LinkedHashMap<String, List<VmRow>>();
+    for (VmRow row : rowsView(indexSchema.getTableName())) {
+      if (columnIndex >= row.getValues().size()) {
+        throw new IllegalStateException("Invalid index metadata for table " + indexSchema.getTableName() + ": " + indexSchema.getColumnName());
+      }
+      String key = encodeIndexKey(row.getValues().get(columnIndex));
+      entries.computeIfAbsent(key, k -> new ArrayList<VmRow>()).add(row);
+    }
+    indexEntries.put(normalize(indexSchema.getName()), entries);
+  }
+
+  private List<IndexSchema> indexesForTable(String tableName) {
+    List<IndexSchema> out = new ArrayList<IndexSchema>();
+    for (IndexSchema indexSchema : schemaRegistry.indexesView().values()) {
+      if (indexSchema.getTableName().equalsIgnoreCase(tableName)) out.add(indexSchema);
+    }
+    return out;
+  }
+
+  private IndexSchema findIndexSchema(String tableName, String columnName) {
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      if (indexSchema.getColumnName().equalsIgnoreCase(columnName)) return indexSchema;
+    }
+    throw new IllegalStateException("Index not found for table " + tableName + " and column " + columnName);
+  }
+
+  private void addRowToIndex(IndexSchema indexSchema, VmRow row) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName()).orElseThrow();
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    String key = encodeIndexKey(row.getValues().get(columnIndex));
+    Map<String, List<VmRow>> entries = indexEntries.computeIfAbsent(normalize(indexSchema.getName()),
+        k -> new LinkedHashMap<String, List<VmRow>>());
+    entries.computeIfAbsent(key, k -> new ArrayList<VmRow>()).add(row);
+  }
+
+  private void removeRowFromIndex(IndexSchema indexSchema, VmRow row) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName()).orElseThrow();
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    String key = encodeIndexKey(row.getValues().get(columnIndex));
+    Map<String, List<VmRow>> entries = indexEntries.get(normalize(indexSchema.getName()));
+    if (entries == null) return;
+    List<VmRow> rows = entries.get(key);
+    if (rows == null) return;
+    rows.remove(row);
+    if (rows.isEmpty()) entries.remove(key);
+  }
+
+  private String encodeIndexKey(VmValue value) {
+    if (value.getType() == VmValue.Type.NULL) return "N:";
+    if (value.getType() == VmValue.Type.INT) return "I:" + value.getValue();
+    return "T:" + value.getValue();
   }
 }

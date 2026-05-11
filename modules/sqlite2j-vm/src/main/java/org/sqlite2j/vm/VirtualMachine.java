@@ -257,28 +257,42 @@ public final class VirtualMachine {
 
     List<VmRow> source = database.rowsView(tableName);
     List<VmRow> updated = new ArrayList<VmRow>(source.size());
+    List<VmRow> oldRows = new ArrayList<VmRow>();
+    List<VmRow> newRows = new ArrayList<VmRow>();
     for (VmRow row : source) {
       if (matchesWhere(tableName, row, where)) {
         List<VmValue> values = new ArrayList<VmValue>(row.getValues());
         values.set(targetColumnIndex, newValue);
-        updated.add(new VmRow(values));
+        VmRow updatedRow = new VmRow(values);
+        oldRows.add(row);
+        newRows.add(updatedRow);
+        updated.add(updatedRow);
       } else {
         updated.add(row);
       }
     }
     database.replaceRows(tableName, updated);
+    for (int i = 0; i < oldRows.size(); i++) {
+      database.onRowUpdated(tableName, oldRows.get(i), newRows.get(i));
+    }
   }
 
   private void applyDeleteRows(String tableName, String where) {
     if (tableName == null) throw new IllegalStateException("No open table for DELETE_ROWS");
     List<VmRow> source = database.rowsView(tableName);
     List<VmRow> kept = new ArrayList<VmRow>();
+    List<VmRow> deleted = new ArrayList<VmRow>();
     for (VmRow row : source) {
       if (!matchesWhere(tableName, row, where)) {
         kept.add(row);
+      } else {
+        deleted.add(row);
       }
     }
     database.replaceRows(tableName, kept);
+    for (VmRow row : deleted) {
+      database.onRowDeleted(tableName, row);
+    }
   }
 
   private void sortRowsIfRequested(List<VmRow> rows, String tableName, String orderBy) {
