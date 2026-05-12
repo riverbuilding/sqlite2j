@@ -19,18 +19,72 @@
 ## 3) Data format convergence
 
 ### 3.1 Page/cell encoding
-- [ ] Define deterministic table leaf cell encoding for current value types (`INT`, `TEXT`, `NULL`).
-- [ ] Define deterministic index key/value encoding for single-column indexes.
-- [ ] Define and lock endianness and header/version markers.
+- [x] **Deterministic table leaf cell encoding (Phase 5 baseline)**
+  - Cell layout (in order):
+    1. `rowId` (`uint64`, big-endian)
+    2. `columnCount` (`uint16`, big-endian)
+    3. Repeated column payloads in schema order:
+       - `typeTag` (`uint8`): `0x00=NULL`, `0x01=INT`, `0x02=TEXT`
+       - `payloadLength` (`uint32`, big-endian)
+       - `payloadBytes`:
+         - `NULL`: length `0`, no payload bytes
+         - `INT`: length `8`, signed 64-bit big-endian two's complement
+         - `TEXT`: UTF-8 bytes (no BOM), exact byte length
+  - No varint or compression in Phase 5 baseline.
+
+- [x] **Deterministic single-column index cell encoding (Phase 5 baseline)**
+  - Cell layout (in order):
+    1. `indexKeyTypeTag` (`uint8`) with same tag mapping as table values
+    2. `indexKeyLength` (`uint32`, big-endian)
+    3. `indexKeyPayload` (encoded exactly like table value payload)
+    4. `rowId` (`uint64`, big-endian) as table-row reference
+  - Duplicate index keys are ordered by ascending `rowId`.
+
+- [x] **Endianness/header/version markers**
+  - Endianness is fixed to big-endian for all fixed-width numeric fields.
+  - File header uses fixed magic + version:
+    - Magic bytes: `S2JDB\0`
+    - Format version: `0x0001` (uint16 big-endian)
+  - Header fields are positional and deterministic; unknown major version => explicit format error.
 
 ### 3.2 File layout
-- [ ] Define minimal database file header for page-backed persistence.
-- [ ] Define page numbering/allocation policy.
-- [ ] Ensure deterministic serialization for identical logical state.
+- [x] **Minimal page-backed file header (Phase 5 baseline)**
+  - File header bytes:
+    1. Magic (`6` bytes): `S2JDB\0`
+    2. Version (`2` bytes, BE): `0x0001`
+    3. Page size (`2` bytes, BE): fixed `4096` in Phase 5
+    4. Root table page number (`4` bytes, BE): default `1`
+    5. Root index catalog page number (`4` bytes, BE): default `2`
+    6. Page count (`4` bytes, BE)
+    7. Reserved (`10` bytes, zeroed in Phase 5)
+
+- [x] **Page numbering/allocation policy**
+  - Page numbers are 1-based.
+  - Page `1`: table root; page `2`: index catalog root.
+  - New pages allocate monotonically (`maxPageNo + 1`), no free-list reuse in Phase 5 baseline.
+  - Within-page cell ordering is deterministic:
+    - Table pages: ascending `rowId`
+    - Index pages: ascending `(key, rowId)` using current value comparison rules.
+
+- [x] **Deterministic serialization rule**
+  - Given identical logical schema/data and insert/update/delete history normalized by current planner behavior, serialized bytes must be identical.
+  - All reserved bytes are zero-filled.
+  - No timestamp/random data may be written into database pages.
 
 ### 3.3 Compatibility migration policy
-- [ ] Decide migration behavior from current `sqlite2j-vm-v1` text format to page format.
-- [ ] Return deterministic, explicit error for unsupported/ambiguous migration states.
+- [x] **Migration behavior from `sqlite2j-vm-v1` text format**
+  - If file starts with text header `sqlite2j-vm-v1`, open in **read-convert-write** migration mode:
+    1. Parse legacy text format strictly.
+    2. Materialize logical schema + rows + indexes in memory.
+    3. Write full Phase 5 page-format file atomically via temp file + rename.
+    4. Reopen using page format and continue normally.
+  - Migration is single-shot; once converted, legacy header is no longer emitted.
+
+- [x] **Deterministic explicit errors for unsupported/ambiguous states**
+  - Invalid/unknown magic bytes => `STORAGE_FORMAT_UNSUPPORTED`.
+  - Known magic with unsupported version => `STORAGE_FORMAT_VERSION_UNSUPPORTED`.
+  - Legacy text parse ambiguity/corruption => `STORAGE_MIGRATION_FAILED`.
+  - Partial/failed atomic rename => `STORAGE_MIGRATION_IOERR`.
 
 ## 4) Runtime wiring (VM -> B-tree -> Pager)
 
