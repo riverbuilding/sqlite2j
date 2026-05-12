@@ -99,8 +99,9 @@ public final class VirtualMachine {
     if (tableName == null) throw new IllegalStateException("No open table for SELECT");
     WhereParts whereParts = parseWhere(where);
     if (whereParts != null && "EQ".equals(whereParts.operator)) {
-      java.util.Optional<String> indexedColumn = database.findIndexColumnForTable(tableName);
-      if (indexedColumn.isPresent() && indexedColumn.get().equalsIgnoreCase(whereParts.columnName)) {
+      java.util.Optional<List<String>> indexedColumns = database.findIndexColumnsForTable(tableName);
+      if (indexedColumns.isPresent() && indexedColumns.get().stream()
+          .anyMatch(c -> c.equalsIgnoreCase(whereParts.columnName))) {
         try {
           lastSelectUsedIndexPath = true;
           return database.lookupRowsByIndex(tableName, whereParts.columnName, parseEncodedLiteral(whereParts.literal));

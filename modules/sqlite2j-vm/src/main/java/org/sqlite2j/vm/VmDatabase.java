@@ -92,13 +92,15 @@ public final class VmDatabase {
     save();
   }
 
-  public Optional<String> findIndexColumnForTable(String tableName) {
+  public Optional<List<String>> findIndexColumnsForTable(String tableName) {
+    List<String> columns = new ArrayList<String>();
     for (IndexSchema indexSchema : schemaRegistry.indexesView().values()) {
       if (indexSchema.getTableName().equalsIgnoreCase(tableName)) {
-        return Optional.of(indexSchema.getColumnName());
+        columns.add(indexSchema.getColumnName());
       }
     }
-    return Optional.empty();
+    if (columns.isEmpty()) return Optional.empty();
+    return Optional.of(columns);
   }
 
   public List<VmRow> lookupRowsByIndex(String tableName, String columnName, VmValue value) {
