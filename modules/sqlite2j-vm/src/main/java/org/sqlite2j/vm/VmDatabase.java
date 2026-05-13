@@ -30,6 +30,9 @@ public final class VmDatabase {
   private final Path catalogPath;
   private final RollbackJournalFile rollbackJournalFile = new RollbackJournalFile();
   private final PageFormatCodec pageFormatCodec = new PageFormatCodec();
+  private final Map<String, TableStorageAdapter> tableStorageAdapters = new LinkedHashMap<String, TableStorageAdapter>();
+  private final IndexStorageAdapter indexStorageAdapter = new IndexStorageAdapter();
+  private final boolean useBtreeReadPath = Boolean.getBoolean("sqlite2j.read.path.btree");
 
   public VmDatabase(Path catalogPath) {
     this.catalogPath = catalogPath;
@@ -46,6 +49,7 @@ public final class VmDatabase {
   public void createTable(TableSchema schema) {
     schemaRegistry.registerTable(schema);
     tableRows.put(normalize(schema.getName()), new ArrayList<VmRow>());
+    initTableAdapter(schema.getName());
     save();
   }
 
@@ -53,6 +57,10 @@ public final class VmDatabase {
     List<VmRow> rows = tableRows.get(normalize(tableName));
     if (rows == null) throw new IllegalStateException("Table not found: " + tableName);
     rows.add(row);
+    TableStorageAdapter adapter = tableStorageAdapters.get(normalize(tableName));
+    if (adapter != null) {
+      try { adapter.insert(row); } catch (IOException ex) { throw new IllegalStateException("Table storage insert failed", ex); }
+    }
     onInsertRow(tableName, row);
     save();
   }
@@ -80,6 +88,16 @@ public final class VmDatabase {
   }
 
   public List<VmRow> rowsView(String tableName) {
+    if (useBtreeReadPath) {
+      TableStorageAdapter adapter = tableStorageAdapters.get(normalize(tableName));
+      if (adapter != null) {
+        try {
+          return adapter.scanAll();
+        } catch (IOException ex) {
+          throw new IllegalStateException("Table storage scan failed", ex);
+        }
+      }
+    }
     List<VmRow> rows = tableRows.get(normalize(tableName));
     if (rows == null) throw new IllegalStateException("Table not found: " + tableName);
     return rows;
@@ -106,10 +124,20 @@ public final class VmDatabase {
 
   public List<VmRow> lookupRowsByIndex(String tableName, String columnName, VmValue value) {
     IndexSchema indexSchema = findIndexSchema(tableName, columnName);
-    Map<String, List<VmRow>> entries = indexEntries.get(normalize(indexSchema.getName()));
-    if (entries == null) throw new IllegalStateException("Missing index entries for index " + indexSchema.getName());
-    List<VmRow> rows = entries.get(encodeIndexKey(value));
-    return rows == null ? new ArrayList<VmRow>() : new ArrayList<VmRow>(rows);
+    if (useBtreeReadPath) {
+      TableSchema tableSchema = schemaRegistry.findTable(tableName).orElseThrow();
+      int columnIndex = findColumnIndex(tableSchema, columnName);
+      List<VmRow> rows = rowsView(tableName);
+      List<Integer> positions = indexStorageAdapter.lookupRowPositions(rows, columnIndex, value);
+      List<VmRow> out = new ArrayList<VmRow>();
+      for (Integer pos : positions) out.add(rows.get(pos.intValue()));
+      return out;
+    } else {
+      Map<String, List<VmRow>> entries = indexEntries.get(normalize(indexSchema.getName()));
+      if (entries == null) throw new IllegalStateException("Missing index entries for index " + indexSchema.getName());
+      List<VmRow> rows = entries.get(encodeIndexKey(value));
+      return rows == null ? new ArrayList<VmRow>() : new ArrayList<VmRow>(rows);
+    }
   }
 
   public void onInsertRow(String tableName, VmRow row) {
@@ -243,6 +271,7 @@ public final class VmDatabase {
     }
     schemaRegistry.registerTable(new TableSchema(tableName, columns));
     tableRows.put(normalize(tableName), new ArrayList<VmRow>());
+    initTableAdapter(tableName);
   }
 
   private void loadRow(String line) {
@@ -337,6 +366,16 @@ public final class VmDatabase {
       return ((String) left.getValue()).compareTo((String) right.getValue());
     }
     return 0;
+  }
+
+  private void initTableAdapter(String tableName) {
+    try {
+      String fileName = catalogPath.getFileName().toString() + "." + normalize(tableName) + ".table";
+      Path path = catalogPath.resolveSibling(fileName);
+      tableStorageAdapters.put(normalize(tableName), new TableStorageAdapter(path));
+    } catch (IOException ex) {
+      throw new IllegalStateException("Unable to initialize table storage adapter for " + tableName, ex);
+    }
   }
 
   private void rebuildAllIndexes() {

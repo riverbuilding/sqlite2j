@@ -277,6 +277,44 @@ class VirtualMachineTest {
   }
 
   @Test
+  void btreeReadPathParityMatchesInMemoryScan() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    System.setProperty("sqlite2j.read.path.btree", "false");
+    VmDatabase dbMemory = new VmDatabase(dbPath);
+    VirtualMachine vmMemory = new VirtualMachine(dbMemory);
+    vmMemory.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vmMemory.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vmMemory.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    VmResult baseline = vmMemory.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+
+    System.setProperty("sqlite2j.read.path.btree", "true");
+    VmDatabase dbBtree = new VmDatabase(dbPath);
+    VirtualMachine vmBtree = new VirtualMachine(dbBtree);
+    VmResult btreeResult = vmBtree.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+    assertEquals(baseline.getRows().size(), btreeResult.getRows().size());
+    assertEquals(baseline.getRows().get(0).getValues().get(1).getValue(), btreeResult.getRows().get(0).getValues().get(1).getValue());
+    System.clearProperty("sqlite2j.read.path.btree");
+  }
+
+  @Test
+  void btreeReadPathSupportsIndexedEqualityWithDeterministicReopen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    System.setProperty("sqlite2j.read.path.btree", "true");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'alice');"));
+    VmResult first = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    VmDatabase reopened = new VmDatabase(dbPath);
+    VirtualMachine vm2 = new VirtualMachine(reopened);
+    VmResult second = vm2.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    assertEquals(first.getRows().size(), second.getRows().size());
+    System.clearProperty("sqlite2j.read.path.btree");
+  }
+
+  @Test
   void updateRowsSupportsFilteredAndUnfilteredForms() throws Exception {
     VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);
