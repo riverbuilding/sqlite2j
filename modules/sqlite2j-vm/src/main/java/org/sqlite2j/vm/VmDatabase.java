@@ -29,6 +29,7 @@ public final class VmDatabase {
   private final Map<String, Map<String, List<VmRow>>> indexEntries = new LinkedHashMap<String, Map<String, List<VmRow>>>();
   private final Path catalogPath;
   private final RollbackJournalFile rollbackJournalFile = new RollbackJournalFile();
+  private final PageFormatCodec pageFormatCodec = new PageFormatCodec();
 
   public VmDatabase(Path catalogPath) {
     this.catalogPath = catalogPath;
@@ -190,16 +191,42 @@ public final class VmDatabase {
   private void load() {
     try {
       if (!Files.exists(catalogPath) || Files.size(catalogPath) == 0) return;
-      List<String> lines = Files.readAllLines(catalogPath, StandardCharsets.UTF_8);
-      if (lines.isEmpty() || !FORMAT_HEADER.equals(lines.get(0))) return;
-      for (int i = 1; i < lines.size(); i++) {
-        String line = lines.get(i);
-        if (line.startsWith("TABLE\t")) loadTable(line);
-        else if (line.startsWith("INDEX\t")) loadIndex(line);
-        else if (line.startsWith("ROW\t")) loadRow(line);
+      byte[] bytes = Files.readAllBytes(catalogPath);
+      if (startsWith(bytes, PageFormatCodec.MAGIC)) {
+        loadPageFormat(bytes);
+        return;
       }
+      String text = new String(bytes, StandardCharsets.UTF_8);
+      if (text.startsWith(FORMAT_HEADER)) {
+        loadLegacyText(text);
+        save(); // single-shot migration to page format
+        return;
+      }
+      throw new IllegalStateException("STORAGE_FORMAT_UNSUPPORTED");
     } catch (IOException e) {
       throw new IllegalStateException("Unable to load database: " + catalogPath, e);
+    }
+  }
+
+  private void loadLegacyText(String text) {
+    String[] lines = text.split("\\R");
+    for (int i = 1; i < lines.length; i++) {
+      String line = lines[i];
+      if (line.startsWith("TABLE\t")) loadTable(line);
+      else if (line.startsWith("INDEX\t")) loadIndex(line);
+      else if (line.startsWith("ROW\t")) loadRow(line);
+    }
+  }
+
+  private void loadPageFormat(byte[] bytes) {
+    PageFormatCodec.Decoded decoded = pageFormatCodec.decode(bytes);
+    for (TableSchema table : decoded.tables) {
+      schemaRegistry.registerTable(table);
+      tableRows.put(normalize(table.getName()), new ArrayList<VmRow>());
+    }
+    tableRows.putAll(decoded.rowsByTable);
+    for (IndexSchema indexSchema : decoded.indexes) {
+      schemaRegistry.registerIndex(indexSchema);
     }
   }
 
@@ -237,27 +264,20 @@ public final class VmDatabase {
   }
 
   private void save() {
-    List<String> lines = new ArrayList<String>();
-    lines.add(FORMAT_HEADER);
-    for (TableSchema table : schemaRegistry.tablesView().values()) {
-      lines.add("TABLE\t" + table.getName() + "\t" + encodeColumns(table.getColumns()));
-      List<VmRow> rows = tableRows.get(normalize(table.getName()));
-      if (rows != null) {
-        for (VmRow row : rows) {
-          lines.add(encodeRow(table.getName(), row));
-        }
-      }
-    }
-    for (IndexSchema index : schemaRegistry.indexesView().values()) {
-      lines.add("INDEX\t" + index.getName() + "\t" + index.getTableName() + "\t" + index.getColumnName());
-    }
     try {
       Path parent = catalogPath.toAbsolutePath().getParent();
       if (parent != null) Files.createDirectories(parent);
-      Files.write(catalogPath, lines, StandardCharsets.UTF_8);
+      byte[] bytes = pageFormatCodec.encode(schemaRegistry.tablesView(), tableRows, schemaRegistry.indexesView());
+      Files.write(catalogPath, bytes);
     } catch (IOException e) {
       throw new IllegalStateException("Unable to save database: " + catalogPath, e);
     }
+  }
+
+  private boolean startsWith(byte[] data, byte[] prefix) {
+    if (data.length < prefix.length) return false;
+    for (int i = 0; i < prefix.length; i++) if (data[i] != prefix[i]) return false;
+    return true;
   }
 
   private String encodeColumns(List<ColumnDef> columns) {

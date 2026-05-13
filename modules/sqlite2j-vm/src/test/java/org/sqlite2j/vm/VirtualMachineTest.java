@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.sqlite2j.compiler.codegen.CompilerFacade;
 import org.sqlite2j.compiler.codegen.Program;
@@ -167,6 +168,48 @@ class VirtualMachineTest {
     VmResult result = reopenedVm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
     assertEquals(1, result.getRows().size());
     assertEquals(true, reopenedVm.lastSelectUsedIndexPath());
+  }
+
+  @Test
+  void databaseFileUsesDeterministicPageHeader() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    byte[] bytes = Files.readAllBytes(dbPath);
+    assertEquals('S', bytes[0]);
+    assertEquals('2', bytes[1]);
+    assertEquals('J', bytes[2]);
+    assertEquals('D', bytes[3]);
+    assertEquals('B', bytes[4]);
+    assertEquals(0, bytes[5]);
+    assertEquals(0, bytes[6]); // version high byte
+    assertEquals(1, bytes[7]); // version low byte
+  }
+
+  @Test
+  void legacyTextFormatMigratesToPageFormatOnOpen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    String legacy = "sqlite2j-vm-v1\nTABLE\tusers\tid:INT,name:TEXT\nROW\tusers\tI:1\tT:" +
+        java.util.Base64.getEncoder().encodeToString("alice".getBytes(StandardCharsets.UTF_8)) + "\n";
+    Files.write(dbPath, legacy.getBytes(StandardCharsets.UTF_8));
+
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals(1, result.getRows().size());
+    byte[] migrated = Files.readAllBytes(dbPath);
+    assertEquals('S', migrated[0]);
+  }
+
+  @Test
+  void unsupportedStorageFormatFailsDeterministically() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    Files.write(dbPath, "garbage-format".getBytes(StandardCharsets.UTF_8));
+    RuntimeException ex = assertThrows(RuntimeException.class, () -> new VmDatabase(dbPath));
+    assertEquals(true, ex.getMessage().contains("STORAGE_FORMAT_UNSUPPORTED"));
   }
 
   @Test
