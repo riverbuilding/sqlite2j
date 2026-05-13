@@ -89,18 +89,61 @@
 ## 4) Runtime wiring (VM -> B-tree -> Pager)
 
 ### 4.1 Read path
-- [ ] Use B-tree cursor read path for table scans.
-- [ ] Use index B-tree lookup path for eligible indexed predicates.
-- [ ] Preserve result equivalence with prior VM-layer behavior.
+- [ ] **Step 1: Introduce storage adapters in VM database layer**
+  - Add a table-storage adapter that wraps `sqlite2j-pager` + `sqlite2j-btree` scan APIs.
+  - Add an index-storage adapter that wraps index key lookup APIs (single-column baseline).
+  - Keep existing VM in-memory model available behind a feature flag for parity validation during migration.
+
+- [ ] **Step 2: Route full table scans through B-tree cursor**
+  - Replace `rowsView(table)` read-source in scan paths with B-tree cursor iteration.
+  - Decode B-tree leaf cells into `VmRow` values using deterministic type mapping (`NULL`/`INT`/`TEXT`).
+  - Keep output ordering equivalent to existing deterministic scan behavior.
+
+- [ ] **Step 3: Route eligible indexed predicates through index B-tree**
+  - Reuse existing equality eligibility rule (`WHERE column = literal`) for first indexed read path.
+  - Resolve candidate row identifiers from index B-tree and fetch rows via table B-tree.
+  - Keep deterministic fallback to full scan for unsupported predicates or invalid index metadata.
+
+- [ ] **Step 4: Parity validation**
+  - Add dual-path assertions in tests (scan vs index path) to prove equal logical results.
+  - Verify deterministic reopen behavior with both indexed and non-indexed reads.
 
 ### 4.2 Write path
-- [ ] Route INSERT table/index mutations through B-tree operations.
-- [ ] Route UPDATE/DELETE through B-tree row mutation/removal flow.
-- [ ] Keep index maintenance and table mutation atomic under existing transaction model.
+- [ ] **Step 5: Route INSERT through B-tree table write**
+  - Encode inserted row into table-leaf cell format and insert via table B-tree API.
+  - For indexed columns, encode index key and insert index entry in index B-tree.
+  - Keep deterministic key ordering for duplicate index keys (`key`, then row id).
+
+- [ ] **Step 6: Route UPDATE through B-tree mutation flow**
+  - Locate candidate rows via scan/index path, apply value mutation, and write updated row payload.
+  - If indexed column changes, remove old index entry and insert new one.
+  - If indexed column does not change, avoid index churn.
+
+- [ ] **Step 7: Route DELETE through B-tree removal flow**
+  - Locate matching rows and remove row cells from table B-tree.
+  - Remove corresponding index entries for all affected indexes.
+  - Validate multi-row delete behavior remains deterministic.
+
+- [ ] **Step 8: Atomicity under current transaction model**
+  - Execute table + index mutations inside existing transaction/journal boundaries.
+  - Ensure journal-before-overwrite guarantees cover all touched pages.
+  - Add tests that fail writes mid-sequence and confirm no persistent table/index divergence after recovery.
 
 ### 4.3 Metadata path
-- [ ] Persist schema/index metadata in page-backed catalog structures.
-- [ ] Ensure metadata open/load is deterministic and validates format/header/version.
+- [ ] **Step 9: Page-backed metadata catalog**
+  - Move table/index schema metadata from VM text-like logical map to page-backed catalog pages.
+  - Define deterministic metadata record layout (table name, column defs, index name, index column).
+  - Keep metadata versioning tied to page-format header version.
+
+- [ ] **Step 10: Deterministic open/load validation**
+  - On open, validate header magic/version/page-size before catalog traversal.
+  - Validate metadata record integrity (bounds, lengths, type tags, duplicate-name rules).
+  - Return explicit deterministic errors for unsupported/corrupt metadata states.
+
+- [ ] **Step 11: Migration and compatibility hardening**
+  - Complete one-shot migration from `sqlite2j-vm-v1` legacy text format to page-backed catalog/table/index pages.
+  - On ambiguous migration state, fail closed with explicit migration error code/category.
+  - Add reopen tests proving migrated databases behave identically to fresh page-format databases.
 
 ## 5) Transaction/journal integration
 
