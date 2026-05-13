@@ -1,6 +1,5 @@
 package org.sqlite2j.vm;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -17,37 +16,38 @@ final class PageFormatCodec {
   static final short PAGE_SIZE = 4096;
 
   byte[] encode(Map<String, TableSchema> tables, Map<String, List<VmRow>> rowsByTable, Map<String, IndexSchema> indexes) {
-    ByteArrayOutputStream out = new ByteArrayOutputStream();
-    writeBytes(out, MAGIC);
-    writeU16(out, VERSION);
-    writeU16(out, PAGE_SIZE);
-    writeU32(out, 1);
-    writeU32(out, 2);
-    writeU32(out, 0); // page count reserved for now
-    writeBytes(out, new byte[10]);
-
-    writeU32(out, tables.size());
+    int size = 6 + 2 + 2 + 4 + 4 + 4 + 10 + 4;
     for (TableSchema table : tables.values()) {
-      writeString(out, table.getName());
-      writeU16(out, table.getColumns().size());
+      size += stringSize(table.getName()) + 2;
+      for (ColumnDef column : table.getColumns()) size += stringSize(column.getName()) + stringSize(column.getType());
+      List<VmRow> rows = rowsByTable.get(table.getName().toLowerCase());
+      size += 4;
+      if (rows != null) for (VmRow row : rows) size += rowSize(row);
+    }
+    size += 4;
+    for (IndexSchema index : indexes.values()) size += stringSize(index.getName()) + stringSize(index.getTableName()) + stringSize(index.getColumnName());
+
+    ByteBuffer out = ByteBuffer.allocate(size).order(ByteOrder.BIG_ENDIAN);
+    out.put(MAGIC).putShort(VERSION).putShort(PAGE_SIZE).putInt(1).putInt(2).putInt(0).put(new byte[10]);
+    out.putInt(tables.size());
+    for (TableSchema table : tables.values()) {
+      putString(out, table.getName());
+      out.putShort((short) table.getColumns().size());
       for (ColumnDef column : table.getColumns()) {
-        writeString(out, column.getName());
-        writeString(out, column.getType());
+        putString(out, column.getName());
+        putString(out, column.getType());
       }
       List<VmRow> rows = rowsByTable.get(table.getName().toLowerCase());
-      writeU32(out, rows == null ? 0 : rows.size());
-      if (rows != null) {
-        for (VmRow row : rows) writeRow(out, row);
-      }
+      out.putInt(rows == null ? 0 : rows.size());
+      if (rows != null) for (VmRow row : rows) putRow(out, row);
     }
-
-    writeU32(out, indexes.size());
+    out.putInt(indexes.size());
     for (IndexSchema index : indexes.values()) {
-      writeString(out, index.getName());
-      writeString(out, index.getTableName());
-      writeString(out, index.getColumnName());
+      putString(out, index.getName());
+      putString(out, index.getTableName());
+      putString(out, index.getColumnName());
     }
-    return out.toByteArray();
+    return out.array();
   }
 
   Decoded decode(byte[] bytes) {
@@ -55,13 +55,8 @@ final class PageFormatCodec {
     byte[] magic = new byte[MAGIC.length];
     in.get(magic);
     for (int i = 0; i < MAGIC.length; i++) if (magic[i] != MAGIC[i]) throw new IllegalStateException("STORAGE_FORMAT_UNSUPPORTED");
-    short version = in.getShort();
-    if (version != VERSION) throw new IllegalStateException("STORAGE_FORMAT_VERSION_UNSUPPORTED");
-    in.getShort(); // page size
-    in.getInt(); // root table page
-    in.getInt(); // root index page
-    in.getInt(); // page count
-    in.position(in.position() + 10); // reserved
+    if (in.getShort() != VERSION) throw new IllegalStateException("STORAGE_FORMAT_VERSION_UNSUPPORTED");
+    in.getShort(); in.getInt(); in.getInt(); in.getInt(); in.position(in.position() + 10);
 
     List<TableSchema> tables = new ArrayList<TableSchema>();
     java.util.LinkedHashMap<String, List<VmRow>> tableRows = new java.util.LinkedHashMap<String, List<VmRow>>();
@@ -69,20 +64,19 @@ final class PageFormatCodec {
     for (int t = 0; t < tableCount; t++) {
       String tableName = readString(in);
       int colCount = in.getShort() & 0xFFFF;
-      List<ColumnDef> columns = new ArrayList<ColumnDef>();
-      for (int c = 0; c < colCount; c++) columns.add(new ColumnDef(readString(in), readString(in)));
-      tables.add(new TableSchema(tableName, columns));
+      List<ColumnDef> cols = new ArrayList<ColumnDef>();
+      for (int c = 0; c < colCount; c++) cols.add(new ColumnDef(readString(in), readString(in)));
+      tables.add(new TableSchema(tableName, cols));
       int rowCount = in.getInt();
       List<VmRow> rows = new ArrayList<VmRow>();
       for (int r = 0; r < rowCount; r++) rows.add(readRow(in));
       tableRows.put(tableName.toLowerCase(), rows);
     }
+
     int indexCount = in.getInt();
-    List<IndexSchema> indexes = new ArrayList<IndexSchema>();
-    for (int i = 0; i < indexCount; i++) {
-      indexes.add(new IndexSchema(readString(in), readString(in), readString(in)));
-    }
-    return new Decoded(tables, tableRows, indexes);
+    List<IndexSchema> idx = new ArrayList<IndexSchema>();
+    for (int i = 0; i < indexCount; i++) idx.add(new IndexSchema(readString(in), readString(in), readString(in)));
+    return new Decoded(tables, tableRows, idx);
   }
 
   static final class Decoded {
@@ -94,18 +88,30 @@ final class PageFormatCodec {
     }
   }
 
-  private void writeRow(ByteArrayOutputStream out, VmRow row) {
-    writeU16(out, row.getValues().size());
-    for (VmValue value : row.getValues()) {
-      if (value.getType() == VmValue.Type.NULL) { out.write(0); writeU32(out, 0); }
-      else if (value.getType() == VmValue.Type.INT) { out.write(1); writeU32(out, 8); writeI64(out, (Long) value.getValue()); }
-      else { byte[] b = String.valueOf(value.getValue()).getBytes(StandardCharsets.UTF_8); out.write(2); writeU32(out, b.length); writeBytes(out, b); }
+  private int stringSize(String v) { return 2 + v.getBytes(StandardCharsets.UTF_8).length; }
+  private int rowSize(VmRow row) {
+    int size = 2;
+    for (VmValue v : row.getValues()) {
+      size += 1 + 4;
+      if (v.getType() == VmValue.Type.INT) size += 8;
+      else if (v.getType() == VmValue.Type.TEXT) size += String.valueOf(v.getValue()).getBytes(StandardCharsets.UTF_8).length;
+    }
+    return size;
+  }
+  private void putString(ByteBuffer out, String v) { byte[] b = v.getBytes(StandardCharsets.UTF_8); out.putShort((short) b.length).put(b); }
+  private String readString(ByteBuffer in) { int l = in.getShort() & 0xFFFF; byte[] b = new byte[l]; in.get(b); return new String(b, StandardCharsets.UTF_8); }
+  private void putRow(ByteBuffer out, VmRow row) {
+    out.putShort((short) row.getValues().size());
+    for (VmValue v : row.getValues()) {
+      if (v.getType() == VmValue.Type.NULL) out.put((byte) 0).putInt(0);
+      else if (v.getType() == VmValue.Type.INT) out.put((byte) 1).putInt(8).putLong((Long) v.getValue());
+      else { byte[] b = String.valueOf(v.getValue()).getBytes(StandardCharsets.UTF_8); out.put((byte) 2).putInt(b.length).put(b); }
     }
   }
   private VmRow readRow(ByteBuffer in) {
-    int count = in.getShort() & 0xFFFF;
+    int n = in.getShort() & 0xFFFF;
     List<VmValue> values = new ArrayList<VmValue>();
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < n; i++) {
       int tag = in.get() & 0xFF;
       int len = in.getInt();
       if (tag == 0) values.add(VmValue.nullValue());
@@ -115,10 +121,4 @@ final class PageFormatCodec {
     }
     return new VmRow(values);
   }
-  private void writeString(ByteArrayOutputStream out, String v) { byte[] b = v.getBytes(StandardCharsets.UTF_8); writeU16(out, b.length); writeBytes(out, b); }
-  private String readString(ByteBuffer in) { int l = in.getShort() & 0xFFFF; byte[] b = new byte[l]; in.get(b); return new String(b, StandardCharsets.UTF_8); }
-  private void writeU16(ByteArrayOutputStream out, int v) { out.write((v >>> 8) & 0xFF); out.write(v & 0xFF); }
-  private void writeU32(ByteArrayOutputStream out, int v) { out.write((v >>> 24) & 0xFF); out.write((v >>> 16) & 0xFF); out.write((v >>> 8) & 0xFF); out.write(v & 0xFF); }
-  private void writeI64(ByteArrayOutputStream out, long v) { for (int i = 7; i >= 0; i--) out.write((int) ((v >>> (8 * i)) & 0xFF)); }
-  private void writeBytes(ByteArrayOutputStream out, byte[] b) { out.write(b, 0, b.length); }
 }
