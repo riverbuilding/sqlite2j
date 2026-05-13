@@ -1,6 +1,5 @@
 # Phase 5 TODO — Storage Engine Convergence (B-tree + Pager On-Disk)
-
-> Planning document only. No implementation code in this phase doc.
+This TODO is the implementation spec. Codex should implement code and tests, not just edit this document.
 
 ## 1) Scope and goals
 
