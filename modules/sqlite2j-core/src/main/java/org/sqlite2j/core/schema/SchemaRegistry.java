@@ -8,6 +8,7 @@ import java.util.Optional;
 
 public final class SchemaRegistry {
   private final Map<String, TableSchema> tables = new LinkedHashMap<>();
+  private final Map<String, IndexSchema> indexes = new LinkedHashMap<String, IndexSchema>();
   private final Path catalogPath;
 
   public SchemaRegistry(Path catalogPath) {
@@ -34,8 +35,21 @@ public final class SchemaRegistry {
     return Collections.unmodifiableMap(tables);
   }
 
+  public void registerIndex(IndexSchema schema) {
+    String key = normalize(schema.getName());
+    if (indexes.containsKey(key)) {
+      throw new SchemaException("Index already exists: " + schema.getName());
+    }
+    indexes.put(key, schema);
+  }
+
+  public Map<String, IndexSchema> indexesView() {
+    return Collections.unmodifiableMap(indexes);
+  }
+
   public void reset() {
     tables.clear();
+    indexes.clear();
   }
 
   private String normalize(String name) {

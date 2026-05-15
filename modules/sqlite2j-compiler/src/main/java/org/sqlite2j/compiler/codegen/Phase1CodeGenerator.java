@@ -5,6 +5,7 @@ import java.util.List;
 import org.sqlite2j.sql.ast.BeginTransactionStatement;
 import org.sqlite2j.sql.ast.ColumnDef;
 import org.sqlite2j.sql.ast.CreateTableStatement;
+import org.sqlite2j.sql.ast.CreateIndexStatement;
 import org.sqlite2j.sql.ast.ColumnExpression;
 import org.sqlite2j.sql.ast.CommitStatement;
 import org.sqlite2j.sql.ast.ComparisonExpression;
@@ -26,6 +27,8 @@ public final class Phase1CodeGenerator {
     Program program = new Program();
     if (statement instanceof CreateTableStatement) {
       emitCreateTable(program, (CreateTableStatement) statement);
+    } else if (statement instanceof CreateIndexStatement) {
+      emitCreateIndex(program, (CreateIndexStatement) statement);
     } else if (statement instanceof InsertStatement) {
       emitInsert(program, (InsertStatement) statement);
     } else if (statement instanceof SelectAllStatement) {
@@ -49,6 +52,10 @@ public final class Phase1CodeGenerator {
 
   private void emitCreateTable(Program program, CreateTableStatement stmt) {
     program.add(Opcode.CREATE_TABLE, stmt.getTableName(), encodeColumns(stmt.getColumns()));
+  }
+
+  private void emitCreateIndex(Program program, CreateIndexStatement stmt) {
+    program.add(Opcode.CREATE_INDEX, stmt.getIndexName(), stmt.getTableName() + ":" + stmt.getColumnName());
   }
 
   private void emitInsert(Program program, InsertStatement stmt) {

@@ -5,9 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.sqlite2j.compiler.codegen.CompilerFacade;
 import org.sqlite2j.compiler.codegen.Program;
+import org.sqlite2j.core.schema.IndexSchema;
 
 class VirtualMachineTest {
   private final CompilerFacade compiler = new CompilerFacade();
@@ -55,6 +57,189 @@ class VirtualMachineTest {
   }
 
   @Test
+  void createIndexValidatesAndPersistsMetadataAcrossReopen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    assertEquals(1, db.getSchemaRegistry().indexesView().size());
+
+    VmDatabase reopened = new VmDatabase(dbPath);
+    assertEquals(1, reopened.getSchemaRegistry().indexesView().size());
+  }
+
+  @Test
+  void createIndexDuplicateNameFailsDeterministically() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    RuntimeException ex = assertThrows(RuntimeException.class,
+        () -> vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (id);")));
+    assertEquals("Index already exists: idx_users_name", ex.getMessage());
+  }
+
+  @Test
+  void selectWithIndexedEqualityReturnsSameRowsAsTableScan() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (3, 'alice');"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    assertEquals(2, result.getRows().size());
+    assertEquals(1L, result.getRows().get(0).getValues().get(0).getValue());
+    assertEquals(3L, result.getRows().get(1).getValues().get(0).getValue());
+  }
+
+  @Test
+  void indexMaintenanceTracksInsertUpdateDelete() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    VmResult insertLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    assertEquals(1, insertLookup.getRows().size());
+
+    vm.execute(compiler.compile("UPDATE users SET name = 'carl' WHERE id = 1;"));
+    VmResult oldKeyLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    VmResult newKeyLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'carl';"));
+    assertEquals(0, oldKeyLookup.getRows().size());
+    assertEquals(1, newKeyLookup.getRows().size());
+
+    vm.execute(compiler.compile("DELETE FROM users WHERE id = 1;"));
+    VmResult deletedLookup = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'carl';"));
+    assertEquals(0, deletedLookup.getRows().size());
+  }
+
+  @Test
+  void plannerPathSelectionUsesIndexOnlyForEqualityPredicate() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+
+    vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    assertEquals(true, vm.lastSelectUsedIndexPath());
+
+    vm.execute(compiler.compile("SELECT * FROM users WHERE name != 'alice';"));
+    assertEquals(false, vm.lastSelectUsedIndexPath());
+  }
+
+  @Test
+  void repeatedIndexedWorkloadIsDeterministic() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (3, 'bob');"));
+
+    VmResult first = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    VmResult second = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    assertEquals(first.getRows().size(), second.getRows().size());
+    for (int i = 0; i < first.getRows().size(); i++) {
+      assertEquals(first.getRows().get(i).getValues().get(0).getValue(), second.getRows().get(i).getValues().get(0).getValue());
+      assertEquals(first.getRows().get(i).getValues().get(1).getValue(), second.getRows().get(i).getValues().get(1).getValue());
+    }
+  }
+
+  @Test
+  void reopenPreservesIndexLookupBehavior() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    VmDatabase reopenedDb = new VmDatabase(dbPath);
+    VirtualMachine reopenedVm = new VirtualMachine(reopenedDb);
+    VmResult result = reopenedVm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    assertEquals(1, result.getRows().size());
+    assertEquals(true, reopenedVm.lastSelectUsedIndexPath());
+  }
+
+  @Test
+  void databaseFileUsesDeterministicPageHeader() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+
+    byte[] bytes = Files.readAllBytes(dbPath);
+    assertEquals('S', bytes[0]);
+    assertEquals('2', bytes[1]);
+    assertEquals('J', bytes[2]);
+    assertEquals('D', bytes[3]);
+    assertEquals('B', bytes[4]);
+    assertEquals(0, bytes[5]);
+    assertEquals(0, bytes[6]); // version high byte
+    assertEquals(1, bytes[7]); // version low byte
+  }
+
+  @Test
+  void legacyTextFormatMigratesToPageFormatOnOpen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    String legacy = "sqlite2j-vm-v1\nTABLE\tusers\tid:INT,name:TEXT\nROW\tusers\tI:1\tT:" +
+        java.util.Base64.getEncoder().encodeToString("alice".getBytes(StandardCharsets.UTF_8)) + "\n";
+    Files.write(dbPath, legacy.getBytes(StandardCharsets.UTF_8));
+
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users;"));
+    assertEquals(1, result.getRows().size());
+    byte[] migrated = Files.readAllBytes(dbPath);
+    assertEquals('S', migrated[0]);
+  }
+
+  @Test
+  void unsupportedStorageFormatFailsDeterministically() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    Files.write(dbPath, "garbage-format".getBytes(StandardCharsets.UTF_8));
+    RuntimeException ex = assertThrows(RuntimeException.class, () -> new VmDatabase(dbPath));
+    assertEquals(true, ex.getMessage().contains("STORAGE_FORMAT_UNSUPPORTED"));
+  }
+
+  @Test
+  void indexedLookupNullAndTypeBoundariesAreDeterministic() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, '1');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'alice');"));
+
+    VmResult textMatch = vm.execute(compiler.compile("SELECT * FROM users WHERE name = '1';"));
+    assertEquals(1, textMatch.getRows().size());
+    assertEquals(1L, textMatch.getRows().get(0).getValues().get(0).getValue());
+  }
+
+  @Test
+  void invalidIndexMetadataFallsBackToScanDeterministically() throws Exception {
+    VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    db.getSchemaRegistry().registerIndex(new IndexSchema("idx_bad", "users", "missing"));
+
+    VmResult result = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice';"));
+    assertEquals(1, result.getRows().size());
+    assertEquals("alice", result.getRows().get(0).getValues().get(1).getValue());
+  }
+
+  @Test
   void selectOrderByUsesDeterministicSortAndStableTies() throws Exception {
     VmDatabase db = new VmDatabase(Files.createTempFile("sqlite2j-vm", ".db"));
     VirtualMachine vm = new VirtualMachine(db);
@@ -89,6 +274,44 @@ class VirtualMachineTest {
     assertEquals(2, filtered.getRows().size());
     assertEquals(2L, filtered.getRows().get(0).getValues().get(0).getValue());
     assertEquals(3L, filtered.getRows().get(1).getValues().get(0).getValue());
+  }
+
+  @Test
+  void btreeReadPathParityMatchesInMemoryScan() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    System.setProperty("sqlite2j.read.path.btree", "false");
+    VmDatabase dbMemory = new VmDatabase(dbPath);
+    VirtualMachine vmMemory = new VirtualMachine(dbMemory);
+    vmMemory.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vmMemory.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vmMemory.execute(compiler.compile("INSERT INTO users VALUES (2, 'bob');"));
+    VmResult baseline = vmMemory.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+
+    System.setProperty("sqlite2j.read.path.btree", "true");
+    VmDatabase dbBtree = new VmDatabase(dbPath);
+    VirtualMachine vmBtree = new VirtualMachine(dbBtree);
+    VmResult btreeResult = vmBtree.execute(compiler.compile("SELECT * FROM users ORDER BY id ASC;"));
+    assertEquals(baseline.getRows().size(), btreeResult.getRows().size());
+    assertEquals(baseline.getRows().get(0).getValues().get(1).getValue(), btreeResult.getRows().get(0).getValues().get(1).getValue());
+    System.clearProperty("sqlite2j.read.path.btree");
+  }
+
+  @Test
+  void btreeReadPathSupportsIndexedEqualityWithDeterministicReopen() throws Exception {
+    java.nio.file.Path dbPath = Files.createTempFile("sqlite2j-vm", ".db");
+    System.setProperty("sqlite2j.read.path.btree", "true");
+    VmDatabase db = new VmDatabase(dbPath);
+    VirtualMachine vm = new VirtualMachine(db);
+    vm.execute(compiler.compile("CREATE TABLE users (id INT, name TEXT);"));
+    vm.execute(compiler.compile("CREATE INDEX idx_users_name ON users (name);"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (1, 'alice');"));
+    vm.execute(compiler.compile("INSERT INTO users VALUES (2, 'alice');"));
+    VmResult first = vm.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    VmDatabase reopened = new VmDatabase(dbPath);
+    VirtualMachine vm2 = new VirtualMachine(reopened);
+    VmResult second = vm2.execute(compiler.compile("SELECT * FROM users WHERE name = 'alice' ORDER BY id ASC;"));
+    assertEquals(first.getRows().size(), second.getRows().size());
+    System.clearProperty("sqlite2j.read.path.btree");
   }
 
   @Test

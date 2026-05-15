@@ -20,3 +20,6 @@ Before finishing any code task, run:
 ```bash
 mvn test
 ```
+
+Additional local rule:
+- Do not use ByteArrayOutputStream or ByteArrayInputStream; use ByteBuffer-based encoding/decoding instead.

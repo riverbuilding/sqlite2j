@@ -11,12 +11,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import org.sqlite2j.journal.CommitMarker;
 import org.sqlite2j.journal.JournalPageRecord;
 import org.sqlite2j.journal.ParsedJournal;
 import org.sqlite2j.journal.RollbackJournalFile;
 import org.sqlite2j.core.schema.SchemaRegistry;
 import org.sqlite2j.core.schema.TableSchema;
+import org.sqlite2j.core.schema.IndexSchema;
 import org.sqlite2j.sql.ast.ColumnDef;
 
 public final class VmDatabase {
@@ -24,14 +26,20 @@ public final class VmDatabase {
 
   private final SchemaRegistry schemaRegistry;
   private final Map<String, List<VmRow>> tableRows = new LinkedHashMap<String, List<VmRow>>();
+  private final Map<String, Map<String, List<VmRow>>> indexEntries = new LinkedHashMap<String, Map<String, List<VmRow>>>();
   private final Path catalogPath;
   private final RollbackJournalFile rollbackJournalFile = new RollbackJournalFile();
+  private final PageFormatCodec pageFormatCodec = new PageFormatCodec();
+  private final Map<String, TableStorageAdapter> tableStorageAdapters = new LinkedHashMap<String, TableStorageAdapter>();
+  private final IndexStorageAdapter indexStorageAdapter = new IndexStorageAdapter();
+  private final boolean useBtreeReadPath = Boolean.getBoolean("sqlite2j.read.path.btree");
 
   public VmDatabase(Path catalogPath) {
     this.catalogPath = catalogPath;
     this.schemaRegistry = new SchemaRegistry(catalogPath);
     recoverJournalIfPresent();
     load();
+    rebuildAllIndexes();
   }
 
   public SchemaRegistry getSchemaRegistry() { return schemaRegistry; }
@@ -41,6 +49,7 @@ public final class VmDatabase {
   public void createTable(TableSchema schema) {
     schemaRegistry.registerTable(schema);
     tableRows.put(normalize(schema.getName()), new ArrayList<VmRow>());
+    initTableAdapter(schema.getName());
     save();
   }
 
@@ -48,6 +57,27 @@ public final class VmDatabase {
     List<VmRow> rows = tableRows.get(normalize(tableName));
     if (rows == null) throw new IllegalStateException("Table not found: " + tableName);
     rows.add(row);
+    TableStorageAdapter adapter = tableStorageAdapters.get(normalize(tableName));
+    if (adapter != null) {
+      try { adapter.insert(row); } catch (IOException ex) { throw new IllegalStateException("Table storage insert failed", ex); }
+    }
+    onInsertRow(tableName, row);
+    save();
+  }
+
+  public void createIndex(IndexSchema indexSchema) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName())
+        .orElseThrow(() -> new IllegalStateException("Table not found: " + indexSchema.getTableName()));
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    List<VmRow> rows = tableRows.get(normalize(indexSchema.getTableName()));
+    for (VmRow row : rows) {
+      if (columnIndex >= row.getValues().size()) {
+        throw new IllegalStateException("Unable to build index; row column missing for " + indexSchema.getColumnName());
+      }
+      row.getValues().get(columnIndex);
+    }
+    schemaRegistry.registerIndex(indexSchema);
+    rebuildIndex(indexSchema);
     save();
   }
 
@@ -58,6 +88,16 @@ public final class VmDatabase {
   }
 
   public List<VmRow> rowsView(String tableName) {
+    if (useBtreeReadPath) {
+      TableStorageAdapter adapter = tableStorageAdapters.get(normalize(tableName));
+      if (adapter != null) {
+        try {
+          return adapter.scanAll();
+        } catch (IOException ex) {
+          throw new IllegalStateException("Table storage scan failed", ex);
+        }
+      }
+    }
     List<VmRow> rows = tableRows.get(normalize(tableName));
     if (rows == null) throw new IllegalStateException("Table not found: " + tableName);
     return rows;
@@ -71,11 +111,68 @@ public final class VmDatabase {
     save();
   }
 
+  public Optional<List<String>> findIndexColumnsForTable(String tableName) {
+    List<String> columns = new ArrayList<String>();
+    for (IndexSchema indexSchema : schemaRegistry.indexesView().values()) {
+      if (indexSchema.getTableName().equalsIgnoreCase(tableName)) {
+        columns.add(indexSchema.getColumnName());
+      }
+    }
+    if (columns.isEmpty()) return Optional.empty();
+    return Optional.of(columns);
+  }
+
+  public List<VmRow> lookupRowsByIndex(String tableName, String columnName, VmValue value) {
+    IndexSchema indexSchema = findIndexSchema(tableName, columnName);
+    if (useBtreeReadPath) {
+      TableSchema tableSchema = schemaRegistry.findTable(tableName).orElseThrow();
+      int columnIndex = findColumnIndex(tableSchema, columnName);
+      List<VmRow> rows = rowsView(tableName);
+      List<Integer> positions = indexStorageAdapter.lookupRowPositions(rows, columnIndex, value);
+      List<VmRow> out = new ArrayList<VmRow>();
+      for (Integer pos : positions) out.add(rows.get(pos.intValue()));
+      return out;
+    } else {
+      Map<String, List<VmRow>> entries = indexEntries.get(normalize(indexSchema.getName()));
+      if (entries == null) throw new IllegalStateException("Missing index entries for index " + indexSchema.getName());
+      List<VmRow> rows = entries.get(encodeIndexKey(value));
+      return rows == null ? new ArrayList<VmRow>() : new ArrayList<VmRow>(rows);
+    }
+  }
+
+  public void onInsertRow(String tableName, VmRow row) {
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      addRowToIndex(indexSchema, row);
+    }
+  }
+
+  public void onRowUpdated(String tableName, VmRow oldRow, VmRow newRow) {
+    TableSchema schema = schemaRegistry.findTable(tableName)
+        .orElseThrow(() -> new IllegalStateException("Table not found: " + tableName));
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      int columnIndex = findColumnIndex(schema, indexSchema.getColumnName());
+      VmValue oldValue = oldRow.getValues().get(columnIndex);
+      VmValue newValue = newRow.getValues().get(columnIndex);
+      if (compareValues(oldValue, newValue) != 0) {
+        removeRowFromIndex(indexSchema, oldRow);
+        addRowToIndex(indexSchema, newRow);
+      }
+    }
+  }
+
+  public void onRowDeleted(String tableName, VmRow row) {
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      removeRowFromIndex(indexSchema, row);
+    }
+  }
+
 
   void reloadFromDisk() {
     tableRows.clear();
+    indexEntries.clear();
     schemaRegistry.reset();
     load();
+    rebuildAllIndexes();
   }
 
 
@@ -122,15 +219,42 @@ public final class VmDatabase {
   private void load() {
     try {
       if (!Files.exists(catalogPath) || Files.size(catalogPath) == 0) return;
-      List<String> lines = Files.readAllLines(catalogPath, StandardCharsets.UTF_8);
-      if (lines.isEmpty() || !FORMAT_HEADER.equals(lines.get(0))) return;
-      for (int i = 1; i < lines.size(); i++) {
-        String line = lines.get(i);
-        if (line.startsWith("TABLE\t")) loadTable(line);
-        else if (line.startsWith("ROW\t")) loadRow(line);
+      byte[] bytes = Files.readAllBytes(catalogPath);
+      if (startsWith(bytes, PageFormatCodec.MAGIC)) {
+        loadPageFormat(bytes);
+        return;
       }
+      String text = new String(bytes, StandardCharsets.UTF_8);
+      if (text.startsWith(FORMAT_HEADER)) {
+        loadLegacyText(text);
+        save(); // single-shot migration to page format
+        return;
+      }
+      throw new IllegalStateException("STORAGE_FORMAT_UNSUPPORTED");
     } catch (IOException e) {
       throw new IllegalStateException("Unable to load database: " + catalogPath, e);
+    }
+  }
+
+  private void loadLegacyText(String text) {
+    String[] lines = text.split("\\R");
+    for (int i = 1; i < lines.length; i++) {
+      String line = lines[i];
+      if (line.startsWith("TABLE\t")) loadTable(line);
+      else if (line.startsWith("INDEX\t")) loadIndex(line);
+      else if (line.startsWith("ROW\t")) loadRow(line);
+    }
+  }
+
+  private void loadPageFormat(byte[] bytes) {
+    PageFormatCodec.Decoded decoded = pageFormatCodec.decode(bytes);
+    for (TableSchema table : decoded.tables) {
+      schemaRegistry.registerTable(table);
+      tableRows.put(normalize(table.getName()), new ArrayList<VmRow>());
+    }
+    tableRows.putAll(decoded.rowsByTable);
+    for (IndexSchema indexSchema : decoded.indexes) {
+      schemaRegistry.registerIndex(indexSchema);
     }
   }
 
@@ -147,6 +271,7 @@ public final class VmDatabase {
     }
     schemaRegistry.registerTable(new TableSchema(tableName, columns));
     tableRows.put(normalize(tableName), new ArrayList<VmRow>());
+    initTableAdapter(tableName);
   }
 
   private void loadRow(String line) {
@@ -161,25 +286,27 @@ public final class VmDatabase {
     rows.add(new VmRow(values));
   }
 
+  private void loadIndex(String line) {
+    String[] parts = line.split("\t", -1);
+    if (parts.length < 4) throw new IllegalStateException("Invalid index line: " + line);
+    schemaRegistry.registerIndex(new IndexSchema(parts[1], parts[2], parts[3]));
+  }
+
   private void save() {
-    List<String> lines = new ArrayList<String>();
-    lines.add(FORMAT_HEADER);
-    for (TableSchema table : schemaRegistry.tablesView().values()) {
-      lines.add("TABLE\t" + table.getName() + "\t" + encodeColumns(table.getColumns()));
-      List<VmRow> rows = tableRows.get(normalize(table.getName()));
-      if (rows != null) {
-        for (VmRow row : rows) {
-          lines.add(encodeRow(table.getName(), row));
-        }
-      }
-    }
     try {
       Path parent = catalogPath.toAbsolutePath().getParent();
       if (parent != null) Files.createDirectories(parent);
-      Files.write(catalogPath, lines, StandardCharsets.UTF_8);
+      byte[] bytes = pageFormatCodec.encode(schemaRegistry.tablesView(), tableRows, schemaRegistry.indexesView());
+      Files.write(catalogPath, bytes);
     } catch (IOException e) {
       throw new IllegalStateException("Unable to save database: " + catalogPath, e);
     }
+  }
+
+  private boolean startsWith(byte[] data, byte[] prefix) {
+    if (data.length < prefix.length) return false;
+    for (int i = 0; i < prefix.length; i++) if (data[i] != prefix[i]) return false;
+    return true;
   }
 
   private String encodeColumns(List<ColumnDef> columns) {
@@ -217,5 +344,101 @@ public final class VmDatabase {
 
   private String normalize(String name) {
     return name.toLowerCase(Locale.ROOT);
+  }
+
+  private int findColumnIndex(TableSchema tableSchema, String columnName) {
+    for (int i = 0; i < tableSchema.getColumns().size(); i++) {
+      if (tableSchema.getColumns().get(i).getName().equalsIgnoreCase(columnName)) {
+        return i;
+      }
+    }
+    throw new IllegalStateException("Unknown column for index: " + columnName);
+  }
+
+  private int compareValues(VmValue left, VmValue right) {
+    if (left.getType() != right.getType()) {
+      return left.getType().ordinal() - right.getType().ordinal();
+    }
+    if (left.getType() == VmValue.Type.INT) {
+      return Long.compare((Long) left.getValue(), (Long) right.getValue());
+    }
+    if (left.getType() == VmValue.Type.TEXT) {
+      return ((String) left.getValue()).compareTo((String) right.getValue());
+    }
+    return 0;
+  }
+
+  private void initTableAdapter(String tableName) {
+    try {
+      String fileName = catalogPath.getFileName().toString() + "." + normalize(tableName) + ".table";
+      Path path = catalogPath.resolveSibling(fileName);
+      tableStorageAdapters.put(normalize(tableName), new TableStorageAdapter(path));
+    } catch (IOException ex) {
+      throw new IllegalStateException("Unable to initialize table storage adapter for " + tableName, ex);
+    }
+  }
+
+  private void rebuildAllIndexes() {
+    indexEntries.clear();
+    for (IndexSchema indexSchema : schemaRegistry.indexesView().values()) {
+      rebuildIndex(indexSchema);
+    }
+  }
+
+  private void rebuildIndex(IndexSchema indexSchema) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName())
+        .orElseThrow(() -> new IllegalStateException("Table not found: " + indexSchema.getTableName()));
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    Map<String, List<VmRow>> entries = new LinkedHashMap<String, List<VmRow>>();
+    for (VmRow row : rowsView(indexSchema.getTableName())) {
+      if (columnIndex >= row.getValues().size()) {
+        throw new IllegalStateException("Invalid index metadata for table " + indexSchema.getTableName() + ": " + indexSchema.getColumnName());
+      }
+      String key = encodeIndexKey(row.getValues().get(columnIndex));
+      entries.computeIfAbsent(key, k -> new ArrayList<VmRow>()).add(row);
+    }
+    indexEntries.put(normalize(indexSchema.getName()), entries);
+  }
+
+  private List<IndexSchema> indexesForTable(String tableName) {
+    List<IndexSchema> out = new ArrayList<IndexSchema>();
+    for (IndexSchema indexSchema : schemaRegistry.indexesView().values()) {
+      if (indexSchema.getTableName().equalsIgnoreCase(tableName)) out.add(indexSchema);
+    }
+    return out;
+  }
+
+  private IndexSchema findIndexSchema(String tableName, String columnName) {
+    for (IndexSchema indexSchema : indexesForTable(tableName)) {
+      if (indexSchema.getColumnName().equalsIgnoreCase(columnName)) return indexSchema;
+    }
+    throw new IllegalStateException("Index not found for table " + tableName + " and column " + columnName);
+  }
+
+  private void addRowToIndex(IndexSchema indexSchema, VmRow row) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName()).orElseThrow();
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    String key = encodeIndexKey(row.getValues().get(columnIndex));
+    Map<String, List<VmRow>> entries = indexEntries.computeIfAbsent(normalize(indexSchema.getName()),
+        k -> new LinkedHashMap<String, List<VmRow>>());
+    entries.computeIfAbsent(key, k -> new ArrayList<VmRow>()).add(row);
+  }
+
+  private void removeRowFromIndex(IndexSchema indexSchema, VmRow row) {
+    TableSchema tableSchema = schemaRegistry.findTable(indexSchema.getTableName()).orElseThrow();
+    int columnIndex = findColumnIndex(tableSchema, indexSchema.getColumnName());
+    String key = encodeIndexKey(row.getValues().get(columnIndex));
+    Map<String, List<VmRow>> entries = indexEntries.get(normalize(indexSchema.getName()));
+    if (entries == null) return;
+    List<VmRow> rows = entries.get(key);
+    if (rows == null) return;
+    rows.remove(row);
+    if (rows.isEmpty()) entries.remove(key);
+  }
+
+  private String encodeIndexKey(VmValue value) {
+    if (value.getType() == VmValue.Type.NULL) return "N:";
+    if (value.getType() == VmValue.Type.INT) return "I:" + value.getValue();
+    return "T:" + value.getValue();
   }
 }

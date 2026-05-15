@@ -21,6 +21,15 @@ class Phase1CodeGeneratorTest {
   }
 
   @Test
+  void createIndexGoldenProgram() {
+    Program program = compiler.compile("CREATE INDEX idx_users_name ON users (name);");
+    assertEquals(
+        "000 CREATE_INDEX idx_users_name users:name\n" +
+        "001 HALT - -",
+        program.toDeterministicString());
+  }
+
+  @Test
   void insertGoldenProgram() {
     Program program = compiler.compile("INSERT INTO users VALUES (1, 'alice');");
     assertEquals(
